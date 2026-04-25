@@ -80,6 +80,16 @@ public class NearMissReportGenerator {
             conn.setAutoCommit(false);
             run(conn, rootDir, outputDir);
         }
+
+        // Delete the DB file from disk now that the connection is fully closed
+        File dbFile = new File(dbPath);
+        if (dbFile.exists()) {
+            if (dbFile.delete()) {
+                System.out.println("Database file deleted: " + dbPath);
+            } else {
+                System.err.println("[WARN] Could not delete database file: " + dbPath);
+            }
+        }
     }
 
     /**
@@ -254,6 +264,11 @@ public class NearMissReportGenerator {
                             }
 
                             double dist = GeoUtils.distance3dFeet(s1.lat, s1.lon, s1.alt, s2.lat, s2.lon, s2.alt);
+
+                            // Skip duplicate data: two distinct aircraft cannot
+                            // occupy the exact same position (same CSV in multiple folders)
+                            if (dist < 1.0)
+                                continue;
 
                             if (dist < NEAR_MISS_FEET) {
                                 NearMissEvent point = new NearMissEvent();

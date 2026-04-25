@@ -87,12 +87,22 @@ public class MainRunner {
             NearMissReportGenerator.run(conn, rootDir, nmDir);
         }
 
+        // Delete the DB file from disk now that the connection is fully closed
+        File dbFile = new File(dbPath);
+        if (dbFile.exists()) {
+            if (dbFile.delete()) {
+                System.out.println("  Database file deleted: " + dbPath);
+            } else {
+                System.err.println("  [WARN] Could not delete database file: " + dbPath);
+            }
+        }
+
         System.out.println();
         System.out.println("==============================================");
         System.out.println("  ALL DONE");
         System.out.println("  Skid reports  : " + outputDir.getAbsolutePath());
         System.out.println("  Near-miss     : " + nmDir.getAbsolutePath());
-        System.out.println("  Database      : Wiped");
+        System.out.println("  Database      : Deleted");
         System.out.println("==============================================");
     }
 }

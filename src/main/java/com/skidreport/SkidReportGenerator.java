@@ -78,6 +78,16 @@ public class SkidReportGenerator {
             conn.setAutoCommit(false);
             run(conn, rootDir, outputDir);
         }
+
+        // Delete the DB file from disk now that the connection is fully closed
+        File dbFile = new File(dbPath);
+        if (dbFile.exists()) {
+            if (dbFile.delete()) {
+                System.out.println("Database file deleted: " + dbPath);
+            } else {
+                System.err.println("[WARN] Could not delete database file: " + dbPath);
+            }
+        }
     }
 
     /**

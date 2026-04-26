@@ -32,6 +32,12 @@ public class CsvParser {
             H_DATE, H_TIME, H_PITCH, H_ROLL, H_LATAC, H_IAS, H_ALT
     };
 
+    // Bank/pitch event detection only needs date, time, pitch, roll.
+    // AltMSL / IAS / LatAc are NOT required so we can read older logs that omit them.
+    private static final String[] ATTITUDE_REQUIRED_COLS = {
+            H_DATE, H_TIME, H_PITCH, H_ROLL
+    };
+
     // -- Near miss column names ----------------------------------------------
     private static final String H_LAT = "Latitude";
     private static final String H_LON = "Longitude";
@@ -104,6 +110,50 @@ public class CsvParser {
                 rec.alt   = parseDouble(getCol(cols, colIndex, H_ALT));
 
                 if (!Double.isNaN(rec.roll) && !Double.isNaN(rec.latAc)) {
+                    records.add(rec);
+                }
+            } catch (Exception ignored) {}
+        }
+        return records;
+    }
+
+    // ========================================================================
+    // PARSE ATTITUDE CSV
+    // Returns FlightRecord with only date/time/pitch/roll populated.
+    // AltMSL / IAS / LatAc are optional -- this lets us process older logs
+    // that omit AltMSL but still contain Pitch and Roll.
+    // ========================================================================
+    public static List<FlightRecord> parseAttitudeCsvFile(File file) throws IOException {
+        List<String> lines = readLines(file);
+        if (lines.size() < 4) return Collections.emptyList();
+
+        Map<String, Integer> colIndex = buildColIndex(lines.get(2));
+
+        for (String req : ATTITUDE_REQUIRED_COLS) {
+            if (!colIndex.containsKey(req)) {
+                System.out.println("    Skipping " + file.getName() + " -- missing column: " + req);
+                return Collections.emptyList();
+            }
+        }
+
+        List<FlightRecord> records = new ArrayList<>();
+        int lastDataLine = lines.size() - 1;
+        for (int i = 3; i < lastDataLine; i++) {
+            String line = lines.get(i).trim();
+            if (line.isEmpty()) continue;
+            String[] cols = splitCsv(line);
+            try {
+                String date = getCol(cols, colIndex, H_DATE).trim();
+                String time = getCol(cols, colIndex, H_TIME).trim();
+                if (date.isEmpty() || time.isEmpty()) continue;
+
+                FlightRecord rec = new FlightRecord();
+                rec.date  = date;
+                rec.time  = time;
+                rec.pitch = parseDouble(getCol(cols, colIndex, H_PITCH));
+                rec.roll  = parseDouble(getCol(cols, colIndex, H_ROLL));
+
+                if (!Double.isNaN(rec.pitch) && !Double.isNaN(rec.roll)) {
                     records.add(rec);
                 }
             } catch (Exception ignored) {}

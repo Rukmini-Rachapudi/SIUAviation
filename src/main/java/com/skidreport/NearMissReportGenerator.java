@@ -1,5 +1,6 @@
 package com.skidreport;
 
+import com.skidreport.csv.NearMissCsvWriter;
 import com.skidreport.db.DatabaseManager;
 import com.skidreport.db.FlightRecordDao;
 import com.skidreport.db.NearMissEventDao;
@@ -123,6 +124,10 @@ public class NearMissReportGenerator {
             System.out.println("\n[PHASE 3] Writing Excel reports...");
             NearMissExcelWriter.writeAll(conn, outputDir);
             System.out.println("[PHASE 3] Complete.");
+
+            System.out.println("\n[PHASE 3] Writing CSV reports (mirror + Power BI)...");
+            NearMissCsvWriter.writeAll(conn);
+            System.out.println("[PHASE 3] CSV complete.");
         }
     }
 

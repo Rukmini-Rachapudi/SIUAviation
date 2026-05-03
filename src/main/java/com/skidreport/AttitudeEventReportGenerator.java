@@ -1,5 +1,6 @@
 package com.skidreport;
 
+import com.skidreport.csv.AttitudeEventCsvWriter;
 import com.skidreport.detect.AttitudeEventDetector;
 import com.skidreport.excel.AttitudeEventExcelWriter;
 import com.skidreport.model.AttitudeEvent;
@@ -85,6 +86,12 @@ public class AttitudeEventReportGenerator {
             return;
         }
 
+        try {
+            AttitudeEventCsvWriter.beginConsolidated();
+        } catch (IOException e) {
+            System.err.println("  [WARN] Could not open consolidated attitude CSVs: " + e.getMessage());
+        }
+
         int totalBank = 0, totalHigh = 0, totalLow = 0;
         boolean anyProcessed = false;
 
@@ -94,10 +101,16 @@ public class AttitudeEventReportGenerator {
             anyProcessed = true;
 
             System.out.println("\n--- Processing " + tail + " ---");
-            int[] counts = processFlightFolder(tail, dir, outputDir);
+            int[] counts = processFlightFolder(tail, dir, outputDir, dayFolder);
             totalBank += counts[0];
             totalHigh += counts[1];
             totalLow  += counts[2];
+        }
+
+        try {
+            AttitudeEventCsvWriter.endConsolidated();
+        } catch (IOException e) {
+            System.err.println("  [WARN] Could not close consolidated attitude CSVs: " + e.getMessage());
         }
 
         if (!anyProcessed) {
@@ -118,7 +131,8 @@ public class AttitudeEventReportGenerator {
     // PER-AIRCRAFT
     // Returns int[3]: total bank, high-pitch, low-pitch events written.
     // ------------------------------------------------------------------------
-    private static int[] processFlightFolder(String tail, File flightDir, File outputDir) {
+    private static int[] processFlightFolder(String tail, File flightDir, File outputDir,
+                                              String dayFolder) {
         List<File> csvFiles = new ArrayList<>();
         CsvParser.collectCsvFiles(flightDir, csvFiles);
         csvFiles.sort((a, b) -> a.getName().compareTo(b.getName()));
@@ -191,6 +205,7 @@ public class AttitudeEventReportGenerator {
             List<AttitudeEvent> h = highByMonth.getOrDefault(yearMonth, java.util.Collections.emptyList());
             List<AttitudeEvent> l = lowByMonth.getOrDefault(yearMonth, java.util.Collections.emptyList());
             AttitudeEventExcelWriter.write(tail, yearMonth, outputDir, b, h, l);
+            AttitudeEventCsvWriter.write(tail, yearMonth, dayFolder, b, h, l);
         }
 
         System.out.printf("  Wrote %d monthly workbook(s) for %s.%n",

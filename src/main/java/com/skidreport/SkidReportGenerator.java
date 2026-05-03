@@ -1,5 +1,6 @@
 package com.skidreport;
 
+import com.skidreport.csv.SkidCsvWriter;
 import com.skidreport.excel.SkidExcelWriter;
 import com.skidreport.model.FlightRecord;
 import com.skidreport.model.SkidEvent;
@@ -62,6 +63,12 @@ public class SkidReportGenerator {
             return;
         }
 
+        try {
+            SkidCsvWriter.beginConsolidated();
+        } catch (IOException e) {
+            System.err.println("  [WARN] Could not open consolidated skid CSV: " + e.getMessage());
+        }
+
         boolean anyProcessed = false;
         for (File dir : subdirs) {
             String tail = detectTailNumber(dir.getName());
@@ -70,6 +77,12 @@ public class SkidReportGenerator {
                 processFlightFolder(tail, dir, outputDir);
                 anyProcessed = true;
             }
+        }
+
+        try {
+            SkidCsvWriter.endConsolidated();
+        } catch (IOException e) {
+            System.err.println("  [WARN] Could not close consolidated skid CSV: " + e.getMessage());
         }
 
         if (!anyProcessed) {
@@ -182,6 +195,7 @@ public class SkidReportGenerator {
         int totalEvents = 0;
         for (Map.Entry<String, List<SkidEvent>> entry : new TreeMap<>(byMonth).entrySet()) {
             SkidExcelWriter.write(tail, entry.getKey(), entry.getValue(), outputDir);
+            SkidCsvWriter.write(tail, entry.getKey(), entry.getValue());
             totalEvents += entry.getValue().size();
         }
 

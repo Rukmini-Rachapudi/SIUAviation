@@ -16,8 +16,8 @@ import java.util.List;
  * NearMissExcelWriter
  *
  * Writes one Excel file per aircraft pair per month.
- * Output: Output/NearMiss/<tail1>_vs_<tail2>/
- *           NearMiss_<tail1>_<tail2>_<YYYY>_<MM>_<Month>.xlsx
+ * Output: <outputDir>/<YYYY>/<MonthName>/NearMiss_<tail1>_<tail2>_<YYYY>_<MM>_<Month>.xlsx
+ * where outputDir = Output/<dayFolder>/Near Miss/.
  *
  * Columns:
  *   A  Local Date
@@ -91,12 +91,12 @@ public class NearMissExcelWriter {
         String monthNum  = parts[1];
         String monthName = DateUtils.monthNameFromYearMonth(yearMonth);
 
-        File pairDir = new File(outputDir, tail1 + "_vs_" + tail2);
-        pairDir.mkdirs();
+        File monthDir = new File(outputDir, year + java.io.File.separator + monthName);
+        monthDir.mkdirs();
 
         String filename = String.format("NearMiss_%s_%s_%s_%s_%s.xlsx",
                 tail1, tail2, year, monthNum, monthName);
-        File outFile = new File(pairDir, filename);
+        File outFile = new File(monthDir, filename);
 
         try (Workbook wb = new XSSFWorkbook()) {
             Sheet sheet = wb.createSheet("Near Miss Events");

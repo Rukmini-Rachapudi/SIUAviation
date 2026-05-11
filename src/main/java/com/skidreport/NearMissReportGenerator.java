@@ -53,17 +53,25 @@ public class NearMissReportGenerator {
 
     public static void main(String[] args) throws Exception {
 
-        File rootDir   = new File(INPUT_PATH);
-        File outputDir = new File(OUTPUT_PATH + "\\NearMiss");
+        String dayFolder = DateUtils.todayDayFolder();
+
+        File rootDir = new File(INPUT_PATH);
+
+        // .db stays at a stable root path so subsequent runs can reuse it as a cache.
+        File dbDir = new File(OUTPUT_PATH + File.separator + "NearMiss");
+        // Report files land inside the per-run day folder, matching skid + bank/pitch.
+        File outputDir = new File(OUTPUT_PATH + File.separator + dayFolder
+                + File.separator + "Near Miss");
 
         if (!rootDir.exists() || !rootDir.isDirectory()) {
             System.err.println("ERROR: INPUT_PATH not found: " + INPUT_PATH);
             System.exit(1);
         }
 
+        dbDir.mkdirs();
         outputDir.mkdirs();
 
-        String dbPath = outputDir.getAbsolutePath() + "\\near_miss.db";
+        String dbPath = dbDir.getAbsolutePath() + File.separator + "near_miss.db";
         System.out.println("Input    : " + INPUT_PATH);
         System.out.println("Output   : " + outputDir.getAbsolutePath());
         System.out.println("Database : " + dbPath);

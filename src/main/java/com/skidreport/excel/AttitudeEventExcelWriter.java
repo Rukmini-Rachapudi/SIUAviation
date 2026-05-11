@@ -17,7 +17,8 @@ import java.util.List;
  *   - "Low Pitch Events"   (Pitch < -30)
  *
  * Output:
- *   <outputDir>/BankPitch_Reports_<tail>/BankPitch_<tail>_<YYYY>_<MM>_<Month>.xlsx
+ *   <outputDir>/<YYYY>/<MonthName>/BankPitch_<tail>_<YYYY>_<MM>_<Month>.xlsx
+ * where outputDir = Output/<dayFolder>/Bank Pitch Events/.
  *
  * Mirrors SkidExcelWriter's layout so a partial run still yields complete files
  * for every aircraft processed so far.
@@ -50,7 +51,7 @@ public class AttitudeEventExcelWriter {
         String monthNum     = parts[1];
         String monthNameStr = DateUtils.monthNameFromYearMonth(yearMonth);
 
-        File reportDir = new File(outputDir, "BankPitch_Reports_" + tail);
+        File reportDir = new File(outputDir, year + File.separator + monthNameStr);
         reportDir.mkdirs();
 
         String filename = String.format("BankPitch_%s_%s_%s_%s.xlsx",

@@ -6,8 +6,6 @@ import com.skidreport.util.DateUtils;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
@@ -16,7 +14,7 @@ import java.util.List;
  * The Excel writer packs all three event types into one workbook (3 sheets).
  * CSV cannot hold multiple sheets, so the mirror layout splits into 3 files:
  *
- *   <CSV_ROOT>\<dayFolder>\Bank Pitch Events\BankPitch_Reports_<tail>\
+ *   <CSV_ROOT>\Bank Pitch Events\<YYYY>\<MonthName>\
  *       Bank_<tail>_<YYYY>_<MM>_<Month>.csv
  *       HighPitch_<tail>_<YYYY>_<MM>_<Month>.csv
  *       LowPitch_<tail>_<YYYY>_<MM>_<Month>.csv
@@ -81,11 +79,11 @@ public final class AttitudeEventCsvWriter {
     // WRITE: one (tail, yearMonth) bundle. Writes the 3 mirror files (skips
     // empty ones) and appends to the corresponding Power BI files.
     //
-    // dayFolder mirrors AttitudeEventReportGenerator's run-day folder (e.g.
-    // "26-apr-2026") so the CSV mirror sits next to the Excel mirror under
-    // the CSV root. The generator passes its computed dayFolder string in.
+    // The CSV mirror lives at <CSV_ROOT>/Bank Pitch Events/<MonthName>/ so
+    // every aircraft's per-month files share the same month folder, matching
+    // the Excel mirror layout.
     // ------------------------------------------------------------------------
-    public static void write(String tail, String yearMonth, String dayFolder,
+    public static void write(String tail, String yearMonth,
                              List<AttitudeEvent> bankEvents,
                              List<AttitudeEvent> highEvents,
                              List<AttitudeEvent> lowEvents) {
@@ -96,8 +94,7 @@ public final class AttitudeEventCsvWriter {
         String monthNameStr = DateUtils.monthNameFromYearMonth(yearMonth);
 
         File reportDir = new File(CsvPaths.csvRoot(),
-                dayFolder + File.separator + "Bank Pitch Events"
-                          + File.separator + "BankPitch_Reports_" + tail);
+                "Bank Pitch Events" + File.separator + year + File.separator + monthNameStr);
         reportDir.mkdirs();
 
         writeOne(Type.BANK, bankEvents, tail, yearMonth, year, monthNum, monthNameStr, reportDir, bankPbi);
@@ -147,10 +144,4 @@ public final class AttitudeEventCsvWriter {
         }
     }
 
-    /** Helper for callers that want today's mirror-layout day folder. */
-    public static String todayDayFolder() {
-        return LocalDate.now()
-                .format(DateTimeFormatter.ofPattern("d-MMM-yyyy"))
-                .toLowerCase();
-    }
 }

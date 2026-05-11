@@ -1,7 +1,6 @@
 package com.skidreport.excel;
 
 import com.skidreport.model.SkidEvent;
-import com.skidreport.util.DateUtils;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
@@ -14,33 +13,45 @@ import java.util.List;
  * SkidExcelWriter
  *
  * Writes one Excel file per aircraft per month.
- * Output: Output/Skid_Reports_<tail>/Skids_<tail>_<YYYY>_<MM>_<Month>.xlsx
+ * Output: <outputDir>/Skids/<YYYY>/<MonthName>/Skids_<tail>_<YYYY>_<MM>_<Month>.xlsx
+ * where outputDir = Output/<dayFolder>/ (e.g. Output/11-may-2026/).
+ * The year layer separates same-month data from different years
+ * (e.g. April 2025 vs April 2026).
+ *
+ * One row per detected skid event (a run of consecutive seconds satisfying the
+ * skid condition; any single non-triggering record closes the event).
  *
  * Columns:
- *   A  Local Date
- *   B  Local Time (HH:MM)
+ *   A  Tail
+ *   B  Local Date
  *   C  Local Month
- *   D  Pitch (avg)
- *   E  Roll (avg)
- *   F  Lateral Acceleration (avg)
- *   G  Indicated Air Speed (avg)
- *   H  GPS Altitude (avg)
- *   I  Skid Count (seconds in this minute)
- *   J  Number of Skid Events (total this month, row 1 only)
- *   K  Low-Altitude-Skid-Events (1 if this minute had a low-alt skid)
- *   L  total-low-altitude-skid-event-count (total this month, row 1 only)
- *   M  Flight name
+ *   D  Start Time (HH:MM:SS)
+ *   E  End Time (HH:MM:SS)
+ *   F  Duration (s)
+ *   G  Trigger Count (seconds in event)
+ *   H  Avg Pitch
+ *   I  Avg Roll
+ *   J  Peak Roll
+ *   K  Avg Lateral Acceleration
+ *   L  Peak Lateral Acceleration
+ *   M  Avg Indicated Air Speed
+ *   N  Avg GPS Altitude
+ *   O  Low-Altitude Skid (1/0)
+ *   P  Number of Skid Events (total this month, row 1 only)
+ *   Q  Total Low-Altitude Skid Events (total this month, row 1 only)
  */
 public class SkidExcelWriter {
 
     private static final String[] HEADERS = {
-            "Local Date", "Local Time (HH:MM:SS)", "Local Month",
-            "Pitch", "Roll", "Lateral Acceleration",
-            "Indicated Air Speed", "Gps Altitude", "Skid Count",
+            "Tail", "Local Date", "Local Month",
+            "Start Time", "End Time", "Duration (s)",
+            "Trigger Count",
+            "Avg Pitch", "Avg Roll", "Peak Roll",
+            "Avg Lateral Acceleration", "Peak Lateral Acceleration",
+            "Avg Indicated Air Speed", "Avg Gps Altitude",
+            "Low-Altitude Skid",
             "Number of Skid Events",
-            "Low-Altitude-Skid-Events",
-            "total-low-altitude-skid-event-count",
-            "Flight name"
+            "Total Low-Altitude Skid Events"
     };
 
     public static void write(String tail, String yearMonth,
@@ -51,7 +62,8 @@ public class SkidExcelWriter {
         String monthNum     = parts[1];
         String monthNameStr = events.get(0).month;
 
-        File reportDir = new File(outputDir, "Skid_Reports_" + tail);
+        File reportDir = new File(outputDir,
+                "Skids" + File.separator + year + File.separator + monthNameStr);
         reportDir.mkdirs();
 
         String filename = String.format("Skids_%s_%s_%s_%s.xlsx",
@@ -61,7 +73,6 @@ public class SkidExcelWriter {
         try (Workbook wb = new XSSFWorkbook()) {
             Sheet sheet = wb.createSheet("Skid Events");
 
-            // Header row (dark blue)
             CellStyle headerStyle = buildHeaderStyle(wb, IndexedColors.DARK_BLUE);
 
             Row hRow = sheet.createRow(0);
@@ -71,19 +82,16 @@ public class SkidExcelWriter {
                 cell.setCellStyle(headerStyle);
             }
 
-            // Cell styles
             CellStyle numStyle    = buildNumStyle(wb, null);
             CellStyle centerStyle = buildCenterStyle(wb, null);
             CellStyle altNumStyle = buildNumStyle(wb, IndexedColors.LIGHT_CORNFLOWER_BLUE);
             CellStyle altStyle    = buildCenterStyle(wb, IndexedColors.LIGHT_CORNFLOWER_BLUE);
 
-            // Total low-alt events for this month
             int totalLowAltEvents = 0;
             for (SkidEvent ev : events) {
-                if (ev.lowAltFrequency > 0) totalLowAltEvents++;
+                if (ev.isLowAlt) totalLowAltEvents++;
             }
 
-            // Data rows
             int rowNum = 1;
             for (SkidEvent ev : events) {
                 Row row      = sheet.createRow(rowNum);
@@ -91,23 +99,26 @@ public class SkidExcelWriter {
                 CellStyle cs  = isAlt ? altStyle    : centerStyle;
                 CellStyle csN = isAlt ? altNumStyle : numStyle;
 
-                createStrCell(row, 0,  ev.date,           cs);
-                createStrCell(row, 1,  ev.minuteTime,     cs);
+                createStrCell(row, 0,  tail,              cs);
+                createStrCell(row, 1,  ev.date,           cs);
                 createStrCell(row, 2,  ev.month,          cs);
-                createNumCell(row, 3,  ev.avgPitch,       csN);
-                createNumCell(row, 4,  ev.avgRoll,        csN);
-                createNumCell(row, 5,  ev.avgLatAc,       csN);
-                createNumCell(row, 6,  ev.avgIas,         csN);
-                createNumCell(row, 7,  ev.avgAlt,         csN);
-                createIntCell(row, 8,  ev.skidFrequency,  cs);
+                createStrCell(row, 3,  ev.startTime,      cs);
+                createStrCell(row, 4,  ev.endTime,        cs);
+                createIntCell(row, 5,  (int) ev.durationSeconds, cs);
+                createIntCell(row, 6,  ev.triggerCount,   cs);
+                createNumCell(row, 7,  ev.avgPitch,       csN);
+                createNumCell(row, 8,  ev.avgRoll,        csN);
+                createNumCell(row, 9,  ev.peakRoll,       csN);
+                createNumCell(row, 10, ev.avgLatAc,       csN);
+                createNumCell(row, 11, ev.peakLatAc,      csN);
+                createNumCell(row, 12, ev.avgIas,         csN);
+                createNumCell(row, 13, ev.avgAlt,         csN);
+                createIntCell(row, 14, ev.isLowAlt ? 1 : 0, cs);
 
-                if (rowNum == 1) createIntCell(row, 9, events.size(), cs);
-
-                if (ev.lowAltFrequency > 0) createIntCell(row, 10, 1, cs);
-
-                if (rowNum == 1) createIntCell(row, 11, totalLowAltEvents, cs);
-
-                createStrCell(row, 12, tail, cs);
+                if (rowNum == 1) {
+                    createIntCell(row, 15, events.size(),     cs);
+                    createIntCell(row, 16, totalLowAltEvents, cs);
+                }
 
                 rowNum++;
             }
@@ -118,7 +129,7 @@ public class SkidExcelWriter {
                 wb.write(fos);
             }
 
-            System.out.printf("    Written: %s  [%d skid-minute(s)]%n",
+            System.out.printf("    Written: %s  [%d skid event(s)]%n",
                     outFile.getName(), events.size());
 
         } catch (IOException e) {

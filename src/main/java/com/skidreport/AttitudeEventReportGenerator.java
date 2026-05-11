@@ -10,8 +10,6 @@ import com.skidreport.util.DateUtils;
 
 import java.io.File;
 import java.io.IOException;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,8 +26,9 @@ import java.util.TreeMap;
  *   High Pitch  : Pitch > 30
  *   Low Pitch   : Pitch < -30
  *
- * Window rule (all three): event opens at first trigger, stays alive while
- * gap-since-last-trigger <= 30 s, closes when 30 s pass with no trigger.
+ * Window rule (all three): event opens at first trigger and extends only while
+ * consecutive records keep triggering. Any single non-triggering record (or a
+ * date change) closes the event. Missing CSV rows are transparent.
  *
  * RESILIENCE / MEMORY:
  *   - CSVs processed in batches of BATCH_SIZE per aircraft (progress feedback).
@@ -60,12 +59,11 @@ public class AttitudeEventReportGenerator {
     };
 
     public static void main(String[] args) throws IOException {
-        String dayFolder = LocalDate.now()
-                .format(DateTimeFormatter.ofPattern("d-MMM-yyyy"))
-                .toLowerCase();
+        String dayFolder = DateUtils.todayDayFolder();
 
         File rootDir   = new File(INPUT_PATH);
-        File outputDir = new File(OUTPUT_PATH + "\\" + dayFolder + "\\Bank Pitch Events");
+        File outputDir = new File(OUTPUT_PATH + File.separator + dayFolder
+                + File.separator + "Bank Pitch Events");
 
         if (!rootDir.exists() || !rootDir.isDirectory()) {
             System.err.println("ERROR: INPUT_PATH not found: " + INPUT_PATH);
@@ -101,7 +99,7 @@ public class AttitudeEventReportGenerator {
             anyProcessed = true;
 
             System.out.println("\n--- Processing " + tail + " ---");
-            int[] counts = processFlightFolder(tail, dir, outputDir, dayFolder);
+            int[] counts = processFlightFolder(tail, dir, outputDir);
             totalBank += counts[0];
             totalHigh += counts[1];
             totalLow  += counts[2];
@@ -131,8 +129,7 @@ public class AttitudeEventReportGenerator {
     // PER-AIRCRAFT
     // Returns int[3]: total bank, high-pitch, low-pitch events written.
     // ------------------------------------------------------------------------
-    private static int[] processFlightFolder(String tail, File flightDir, File outputDir,
-                                              String dayFolder) {
+    private static int[] processFlightFolder(String tail, File flightDir, File outputDir) {
         List<File> csvFiles = new ArrayList<>();
         CsvParser.collectCsvFiles(flightDir, csvFiles);
         csvFiles.sort((a, b) -> a.getName().compareTo(b.getName()));
@@ -205,7 +202,7 @@ public class AttitudeEventReportGenerator {
             List<AttitudeEvent> h = highByMonth.getOrDefault(yearMonth, java.util.Collections.emptyList());
             List<AttitudeEvent> l = lowByMonth.getOrDefault(yearMonth, java.util.Collections.emptyList());
             AttitudeEventExcelWriter.write(tail, yearMonth, outputDir, b, h, l);
-            AttitudeEventCsvWriter.write(tail, yearMonth, dayFolder, b, h, l);
+            AttitudeEventCsvWriter.write(tail, yearMonth, b, h, l);
         }
 
         System.out.printf("  Wrote %d monthly workbook(s) for %s.%n",

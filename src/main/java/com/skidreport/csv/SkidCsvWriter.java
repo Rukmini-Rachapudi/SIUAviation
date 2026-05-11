@@ -11,10 +11,13 @@ import java.util.List;
  * Writes skid events to two CSV outputs:
  *
  *   1. Mirror file (one per aircraft per month) -- same shape as the Excel:
- *        <CSV_ROOT>\Skid_Reports_<tail>\Skids_<tail>_<YYYY>_<MM>_<Month>.csv
+ *        <CSV_ROOT>\Skids\<YYYY>\<MonthName>\Skids_<tail>_<YYYY>_<MM>_<Month>.csv
  *
  *   2. Consolidated Power BI file (one shared file across all aircraft/months):
  *        <POWERBI_ROOT>\skid_events.csv
+ *
+ * Each row is one detected skid event (a run of consecutive seconds satisfying
+ * the skid condition; any single non-triggering record closes the event).
  *
  * The Power BI file is rewritten from scratch each run via #beginConsolidated.
  * Every row carries tail and year_month so a single Power BI table can be
@@ -23,19 +26,23 @@ import java.util.List;
 public final class SkidCsvWriter {
 
     private static final String[] MIRROR_HEADERS = {
-            "Local Date", "Local Time (HH:MM:SS)", "Local Month",
-            "Pitch", "Roll", "Lateral Acceleration",
-            "Indicated Air Speed", "Gps Altitude", "Skid Count",
+            "Tail", "Local Date", "Local Month",
+            "Start Time", "End Time", "Duration (s)",
+            "Trigger Count",
+            "Avg Pitch", "Avg Roll", "Peak Roll",
+            "Avg Lateral Acceleration", "Peak Lateral Acceleration",
+            "Avg Indicated Air Speed", "Avg Gps Altitude",
+            "Low-Altitude Skid",
             "Number of Skid Events",
-            "Low-Altitude-Skid-Events",
-            "total-low-altitude-skid-event-count",
-            "Flight name"
+            "Total Low-Altitude Skid Events"
     };
 
     private static final String[] CONSOLIDATED_HEADERS = {
-            "tail", "year_month", "local_date", "local_time", "local_month_name",
-            "avg_pitch", "avg_roll", "avg_lat_ac",
-            "avg_ias", "avg_alt", "skid_count",
+            "tail", "year_month", "local_date", "local_month_name",
+            "start_time", "end_time", "duration_seconds", "trigger_count",
+            "avg_pitch", "avg_roll", "peak_roll",
+            "avg_lat_ac", "peak_lat_ac",
+            "avg_ias", "avg_alt",
             "is_low_altitude_skid"
     };
 
@@ -73,7 +80,8 @@ public final class SkidCsvWriter {
         String monthNum     = parts[1];
         String monthNameStr = events.get(0).month;
 
-        File reportDir = new File(CsvPaths.csvRoot(), "Skid_Reports_" + tail);
+        File reportDir = new File(CsvPaths.csvRoot(),
+                "Skids" + File.separator + year + File.separator + monthNameStr);
         reportDir.mkdirs();
 
         String filename = String.format("Skids_%s_%s_%s_%s.csv",
@@ -85,29 +93,32 @@ public final class SkidCsvWriter {
 
             int totalLowAltEvents = 0;
             for (SkidEvent ev : events) {
-                if (ev.lowAltFrequency > 0) totalLowAltEvents++;
+                if (ev.isLowAlt) totalLowAltEvents++;
             }
 
             int rowNum = 1;
             for (SkidEvent ev : events) {
                 Object numberOfSkidEvents = (rowNum == 1) ? Integer.valueOf(events.size()) : "";
-                Object lowAltFlag         = (ev.lowAltFrequency > 0) ? Integer.valueOf(1) : "";
                 Object totalLowAlt        = (rowNum == 1) ? Integer.valueOf(totalLowAltEvents) : "";
 
                 CsvWriterUtil.writeRow(w, new Object[]{
+                        tail,
                         ev.date,
-                        ev.minuteTime,
                         ev.month,
+                        ev.startTime,
+                        ev.endTime,
+                        ev.durationSeconds,
+                        ev.triggerCount,
                         ev.avgPitch,
                         ev.avgRoll,
+                        ev.peakRoll,
                         ev.avgLatAc,
+                        ev.peakLatAc,
                         ev.avgIas,
                         ev.avgAlt,
-                        ev.skidFrequency,
+                        ev.isLowAlt ? 1 : 0,
                         numberOfSkidEvents,
-                        lowAltFlag,
-                        totalLowAlt,
-                        tail
+                        totalLowAlt
                 });
 
                 if (consolidatedWriter != null) {
@@ -115,21 +126,25 @@ public final class SkidCsvWriter {
                             tail,
                             yearMonth,
                             ev.date,
-                            ev.minuteTime,
                             ev.month,
+                            ev.startTime,
+                            ev.endTime,
+                            ev.durationSeconds,
+                            ev.triggerCount,
                             ev.avgPitch,
                             ev.avgRoll,
+                            ev.peakRoll,
                             ev.avgLatAc,
+                            ev.peakLatAc,
                             ev.avgIas,
                             ev.avgAlt,
-                            ev.skidFrequency,
-                            (ev.lowAltFrequency > 0) ? 1 : 0
+                            ev.isLowAlt ? 1 : 0
                     });
                 }
                 rowNum++;
             }
 
-            System.out.printf("    CSV: %s  [%d skid-minute(s)]%n",
+            System.out.printf("    CSV: %s  [%d skid event(s)]%n",
                     outFile.getName(), events.size());
 
         } catch (IOException e) {

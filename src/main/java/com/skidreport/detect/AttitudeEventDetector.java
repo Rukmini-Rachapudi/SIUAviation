@@ -12,29 +12,25 @@ import java.util.List;
 import java.util.function.ToDoubleFunction;
 
 /**
- * Generic 30-second-gap event detector for attitude triggers
- * (Bank, High Pitch, Low Pitch).
- *
- * USAGE:
- *   AttitudeEventDetector det = new AttitudeEventDetector(
- *       AttitudeEventDetector.BANK_TRIGGER,
- *       r -> r.roll);
- *   for (FlightRecord r : records) det.accept(r);
- *   List<AttitudeEvent> events = det.flush();
+ * Single-field event detector for attitude triggers (Bank, High Pitch, Low Pitch).
  *
  * RULES:
- *   - A trigger is any sample where {@link Trigger#isTriggered(double)} returns true.
- *   - An event opens at the first trigger sample.
- *   - The event stays alive while gap-since-last-trigger <= 30 seconds.
- *   - The event closes when 30 s pass with no further trigger; its endTime is the
- *     time of the most-recent trigger sample (not last_trigger + 30 s).
- *   - peakValue is the sample value with the largest absolute magnitude inside the
- *     event window (signed). For Bank this captures the worst left- or right-bank;
- *     for High Pitch this is the largest positive pitch; for Low Pitch the most-negative.
+ *   - A trigger is any record where {@link Trigger#isTriggered(double)} returns true.
+ *   - An event opens at the first triggering record.
+ *   - The event extends only while consecutive records keep triggering.
+ *   - Any single non-triggering record closes the current event.
+ *   - Records missing from the CSV are transparent: the next record present in
+ *     the file decides whether the event continues. A non-trigger present in the
+ *     file is what ends an event, never an absent timestamp.
+ *   - A change of date also closes the open event.
+ *
+ *   peakValue is the signed sample value with the largest absolute magnitude
+ *   inside the event window. For Bank this captures the worst left- or
+ *   right-bank; for High Pitch this is the largest positive pitch; for Low
+ *   Pitch the most-negative.
  */
 public class AttitudeEventDetector {
 
-    private static final long GAP_THRESHOLD_SECONDS = 30;
     private static final DateTimeFormatter HMS = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     public interface Trigger {
@@ -60,39 +56,35 @@ public class AttitudeEventDetector {
         this.field = field;
     }
 
-    /** Feed one record into the detector. Order matters; records should be in time order. */
+    /** Feed one record into the detector. Order matters; records must be in time order. */
     public void accept(FlightRecord rec) {
         double v = field.applyAsDouble(rec);
         boolean fires = trigger.isTriggered(v);
-        if (!fires) return;
 
-        String time = DateUtils.normalizeTime(rec.time);
-        LocalTime lt;
-        try {
-            lt = LocalTime.parse(time, HMS);
-        } catch (Exception e) {
+        if (open == null) {
+            if (fires) {
+                LocalTime lt = parseTime(rec.time);
+                if (lt != null) startEvent(rec, DateUtils.normalizeTime(rec.time), lt, v);
+            }
             return;
         }
 
-        if (open == null) {
-            startEvent(rec, time, lt, v);
+        if (!fires) {
+            closeEvent();
             return;
         }
 
         if (!rec.date.equals(openDate)) {
             closeEvent();
-            startEvent(rec, time, lt, v);
+            LocalTime lt = parseTime(rec.time);
+            if (lt != null) startEvent(rec, DateUtils.normalizeTime(rec.time), lt, v);
             return;
         }
 
-        long gap = Duration.between(openLastTriggerLT, lt).getSeconds();
-        if (gap < 0 || gap > GAP_THRESHOLD_SECONDS) {
-            closeEvent();
-            startEvent(rec, time, lt, v);
-            return;
-        }
+        LocalTime lt = parseTime(rec.time);
+        if (lt == null) return;
 
-        open.endTime = time;
+        open.endTime = DateUtils.normalizeTime(rec.time);
         open.triggerCount++;
         if (Math.abs(v) > Math.abs(open.peakValue)) open.peakValue = v;
         openLastTriggerLT = lt;
@@ -102,6 +94,14 @@ public class AttitudeEventDetector {
     public List<AttitudeEvent> flush() {
         if (open != null) closeEvent();
         return events;
+    }
+
+    private LocalTime parseTime(String time) {
+        try {
+            return LocalTime.parse(DateUtils.normalizeTime(time), HMS);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void startEvent(FlightRecord rec, String time, LocalTime lt, double v) {
@@ -119,9 +119,11 @@ public class AttitudeEventDetector {
     private void closeEvent() {
         try {
             LocalTime start = LocalTime.parse(open.startTime, HMS);
-            open.durationSeconds = Math.max(0, Duration.between(start, openLastTriggerLT).getSeconds());
+            // Wall-clock span inclusive of both endpoints: a single-second
+            // event spans 1 s, a 5-second event spans 5 s.
+            open.durationSeconds = Math.max(1, Duration.between(start, openLastTriggerLT).getSeconds() + 1);
         } catch (Exception e) {
-            open.durationSeconds = 0;
+            open.durationSeconds = open.triggerCount;
         }
         events.add(open);
         open = null;

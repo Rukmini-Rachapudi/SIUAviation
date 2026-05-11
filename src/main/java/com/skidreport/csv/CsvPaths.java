@@ -12,10 +12,11 @@ import java.io.File;
  *   CSV root    : ...\Skids Monthly Reports\Output\CSV\            (mirror layout)
  *   Power BI    : ...\Skids Monthly Reports\Output\PowerBI_CSV\    (consolidated, one file per event type)
  *
- * Mirror layout under CSV/:
- *   Skid_Reports_<tail>\Skids_<tail>_<YYYY>_<MM>_<Month>.csv
- *   NearMiss\<tail1>_vs_<tail2>\NearMiss_<tail1>_<tail2>_<YYYY>_<MM>_<Month>.csv
- *   <dayFolder>\Bank Pitch Events\BankPitch_Reports_<tail>\
+ * Mirror layout under CSV/ (overwritten each run -- not nested under dayFolder
+ * so Power BI handoff paths stay stable):
+ *   Skids\<YYYY>\<MonthName>\Skids_<tail>_<YYYY>_<MM>_<Month>.csv
+ *   Near Miss\<YYYY>\<MonthName>\NearMiss_<tail1>_<tail2>_<YYYY>_<MM>_<Month>.csv
+ *   Bank Pitch Events\<YYYY>\<MonthName>\
  *       Bank_<tail>_<YYYY>_<MM>_<Month>.csv
  *       HighPitch_<tail>_<YYYY>_<MM>_<Month>.csv
  *       LowPitch_<tail>_<YYYY>_<MM>_<Month>.csv

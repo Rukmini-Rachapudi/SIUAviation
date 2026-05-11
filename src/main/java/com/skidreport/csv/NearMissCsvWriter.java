@@ -13,7 +13,7 @@ import java.util.List;
  * Writes near-miss events to two CSV outputs:
  *
  *   1. Mirror file (one per aircraft pair per month):
- *        <CSV_ROOT>\NearMiss\<tail1>_vs_<tail2>\
+ *        <CSV_ROOT>\Near Miss\<YYYY>\<MonthName>\
  *            NearMiss_<tail1>_<tail2>_<YYYY>_<MM>_<Month>.csv
  *
  *   2. Consolidated Power BI file (one across all pairs/months):
@@ -70,13 +70,13 @@ public final class NearMissCsvWriter {
         String monthNum  = parts[1];
         String monthName = com.skidreport.util.DateUtils.monthNameFromYearMonth(yearMonth);
 
-        File rootNm  = new File(CsvPaths.csvRoot(), "NearMiss");
-        File pairDir = new File(rootNm, tail1 + "_vs_" + tail2);
-        pairDir.mkdirs();
+        File monthDir = new File(CsvPaths.csvRoot(),
+                "Near Miss" + File.separator + year + File.separator + monthName);
+        monthDir.mkdirs();
 
         String filename = String.format("NearMiss_%s_%s_%s_%s_%s.csv",
                 tail1, tail2, year, monthNum, monthName);
-        File outFile = new File(pairDir, filename);
+        File outFile = new File(monthDir, filename);
 
         try (BufferedWriter w = CsvWriterUtil.open(outFile)) {
             CsvWriterUtil.writeHeader(w, MIRROR_HEADERS);

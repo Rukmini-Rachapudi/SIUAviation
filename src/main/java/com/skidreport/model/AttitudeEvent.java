@@ -3,8 +3,9 @@ package com.skidreport.model;
 /**
  * One detected Bank / High-Pitch / Low-Pitch event.
  *
- * An event spans from the first trigger sample until the last trigger sample,
- * with the rule that any gap > 30 s between consecutive triggers closes the event.
+ * An event spans from the first triggering record until the last consecutive
+ * triggering record; any single non-triggering record (or a date change)
+ * closes the event.
  *
  * peakValue holds the signed extremum (most-positive for High Pitch / Right Bank,
  * most-negative for Low Pitch / Left Bank, largest absolute value for Bank).

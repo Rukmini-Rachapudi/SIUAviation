@@ -49,6 +49,23 @@ public class DateUtils {
     }
 
     // ------------------------------------------------------------------------
+    // secondsOfDay: "HH:MM:SS" -> int seconds since 00:00:00
+    // Returns -1 if the input is malformed. Used to detect consecutive seconds
+    // when aggregating near-miss snapshots into duration-based events.
+    // ------------------------------------------------------------------------
+    public static int secondsOfDay(String time) {
+        if (time == null || time.length() < 8) return -1;
+        try {
+            int h = Integer.parseInt(time.substring(0, 2));
+            int m = Integer.parseInt(time.substring(3, 5));
+            int s = Integer.parseInt(time.substring(6, 8));
+            return h * 3600 + m * 60 + s;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    // ------------------------------------------------------------------------
     // yearMonthKey: extracts YYYY-MM from a date string
     // Handles both YYYY-MM-DD and MM/DD/YYYY formats
     // ------------------------------------------------------------------------

@@ -184,7 +184,13 @@ public class NearMissReportGenerator {
     }
 
     // ------------------------------------------------------------------------
-    // PHASE 3 HELPER: Detect near misses across all aircraft for every date
+    // PHASE 3 HELPER: Detect near-miss events across all aircraft for every date
+    //
+    // For each pair of aircraft, a single "event" spans one or more consecutive
+    // seconds (t, t+1, t+2, ...) where the pair is within NEAR_MISS_FEET. Any
+    // gap -- a non-consecutive second, a second where the pair is no longer
+    // within range, or a date boundary -- closes the event. The output row
+    // captures duration and the closest-approach snapshot inside that window.
     // ------------------------------------------------------------------------
     private static int detectNearMisses(Connection conn) throws Exception {
 
@@ -195,28 +201,27 @@ public class NearMissReportGenerator {
 
         for (String date : dates) {
 
-            // Load all aircraft positions for this date grouped by second
-            // Map: HH:MM:SS -> list of aircraft snapshots
             Map<String, List<AircraftSnapshot>> byTime = new LinkedHashMap<>();
             FlightRecordDao.loadByDate(conn, date, byTime);
 
-            List<NearMissEvent> eventsForDate = new ArrayList<>();
+            // pairKey ("tail1|tail2", tails already alphabetized) -> in-progress event
+            Map<String, ActiveEvent> active = new LinkedHashMap<>();
+            List<NearMissEvent> finalized = new ArrayList<>();
 
             for (Map.Entry<String, List<AircraftSnapshot>> entry : byTime.entrySet()) {
                 String time = entry.getKey();
+                int    currentSec = DateUtils.secondsOfDay(time);
                 List<AircraftSnapshot> snaps = entry.getValue();
 
                 if (snaps.size() < 2) continue;
 
-                // Compare every unique pair at this second
                 for (int i = 0; i < snaps.size(); i++) {
                     for (int j = i + 1; j < snaps.size(); j++) {
                         AircraftSnapshot a = snaps.get(i);
                         AircraftSnapshot b = snaps.get(j);
 
-                        // Enforce alphabetical order to avoid duplicates (A-B and B-A)
-                        String tail1; String tail2;
                         AircraftSnapshot s1; AircraftSnapshot s2;
+                        String tail1; String tail2;
                         if (a.tail.compareTo(b.tail) <= 0) {
                             tail1 = a.tail; s1 = a;
                             tail2 = b.tail; s2 = b;
@@ -229,36 +234,87 @@ public class NearMissReportGenerator {
                                 s1.lat, s1.lon, s1.alt,
                                 s2.lat, s2.lon, s2.alt);
 
-                        if (distFt < NEAR_MISS_FEET) {
-                            NearMissEvent ev = new NearMissEvent();
-                            ev.date       = date;
-                            ev.time       = time;
-                            ev.tail1      = tail1;
-                            ev.tail2      = tail2;
-                            ev.lat1       = s1.lat;
-                            ev.lon1       = s1.lon;
-                            ev.alt1       = s1.alt;
-                            ev.ias1       = s1.ias;
-                            ev.lat2       = s2.lat;
-                            ev.lon2       = s2.lon;
-                            ev.alt2       = s2.alt;
-                            ev.ias2       = s2.ias;
-                            ev.distanceFt = distFt;
-                            ev.yearMonth  = DateUtils.yearMonthKey(date);
-                            eventsForDate.add(ev);
+                        if (distFt >= NEAR_MISS_FEET) continue;
+
+                        String pairKey = tail1 + "|" + tail2;
+                        ActiveEvent ae = active.get(pairKey);
+
+                        boolean canExtend = ae != null
+                                && currentSec >= 0
+                                && ae.lastSec >= 0
+                                && currentSec == ae.lastSec + 1;
+
+                        if (canExtend) {
+                            ae.lastSec       = currentSec;
+                            ae.durationSecs++;
+                            if (distFt < ae.minDist) {
+                                ae.minDist = distFt;
+                                ae.lat1 = s1.lat; ae.lon1 = s1.lon; ae.alt1 = s1.alt; ae.ias1 = s1.ias;
+                                ae.lat2 = s2.lat; ae.lon2 = s2.lon; ae.alt2 = s2.alt; ae.ias2 = s2.ias;
+                            }
+                        } else {
+                            // gap or first sighting: close any previous event, start fresh
+                            if (ae != null) finalized.add(toEvent(ae, date));
+
+                            ActiveEvent fresh = new ActiveEvent();
+                            fresh.tail1        = tail1;
+                            fresh.tail2        = tail2;
+                            fresh.startTime    = time;
+                            fresh.lastSec      = currentSec;
+                            fresh.durationSecs = 1;
+                            fresh.minDist      = distFt;
+                            fresh.lat1 = s1.lat; fresh.lon1 = s1.lon; fresh.alt1 = s1.alt; fresh.ias1 = s1.ias;
+                            fresh.lat2 = s2.lat; fresh.lon2 = s2.lon; fresh.alt2 = s2.alt; fresh.ias2 = s2.ias;
+                            active.put(pairKey, fresh);
                         }
                     }
                 }
             }
 
-            if (!eventsForDate.isEmpty()) {
-                NearMissEventDao.insertBatch(conn, eventsForDate);
-                totalEvents += eventsForDate.size();
+            // Flush events still in progress at end of date
+            for (ActiveEvent ae : active.values()) {
+                finalized.add(toEvent(ae, date));
+            }
+
+            if (!finalized.isEmpty()) {
+                NearMissEventDao.insertBatch(conn, finalized);
+                totalEvents += finalized.size();
             }
 
             System.out.printf("  Date %s -- %d event(s) found so far.%n", date, totalEvents);
         }
 
         return totalEvents;
+    }
+
+    private static NearMissEvent toEvent(ActiveEvent ae, String date) {
+        NearMissEvent ev = new NearMissEvent();
+        ev.date            = date;
+        ev.startTime       = ae.startTime;
+        ev.durationSeconds = ae.durationSecs;
+        ev.tail1           = ae.tail1;
+        ev.tail2           = ae.tail2;
+        ev.lat1            = ae.lat1;
+        ev.lon1            = ae.lon1;
+        ev.alt1            = ae.alt1;
+        ev.ias1            = ae.ias1;
+        ev.lat2            = ae.lat2;
+        ev.lon2            = ae.lon2;
+        ev.alt2            = ae.alt2;
+        ev.ias2            = ae.ias2;
+        ev.minDistanceFt   = ae.minDist;
+        ev.yearMonth       = DateUtils.yearMonthKey(date);
+        return ev;
+    }
+
+    private static class ActiveEvent {
+        String tail1;
+        String tail2;
+        String startTime;      // HH:MM:SS at event start
+        int    lastSec;        // seconds-of-day of most recent qualifying second
+        long   durationSecs;
+        double minDist;
+        double lat1, lon1, alt1, ias1;
+        double lat2, lon2, alt2, ias2;
     }
 }

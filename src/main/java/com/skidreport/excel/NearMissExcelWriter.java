@@ -15,31 +15,35 @@ import java.util.List;
 /**
  * NearMissExcelWriter
  *
- * Writes one Excel file per aircraft pair per month.
+ * Writes one Excel file per aircraft pair per month. One row per aggregated
+ * event (a run of consecutive seconds the pair was within 500 ft); the
+ * aircraft snapshot columns are taken at the second of closest approach.
  * Output: <outputDir>/<YYYY>/<MonthName>/NearMiss_<tail1>_<tail2>_<YYYY>_<MM>_<Month>.xlsx
  * where outputDir = Output/<dayFolder>/Near Miss/.
  *
  * Columns:
  *   A  Local Date
- *   B  Local Time
- *   C  Aircraft 1
- *   D  Latitude 1
- *   E  Longitude 1
- *   F  Altitude 1 (ft)
- *   G  IAS 1 (kts)
- *   H  Aircraft 2
- *   I  Latitude 2
- *   J  Longitude 2
- *   K  Altitude 2 (ft)
- *   L  IAS 2 (kts)
- *   M  Distance (ft)
- *   N  Total Near-Miss Events This Month (row 1 only)
+ *   B  Start Time
+ *   C  Duration (sec)
+ *   D  Aircraft 1
+ *   E  Latitude 1
+ *   F  Longitude 1
+ *   G  Altitude 1 (ft)
+ *   H  IAS 1 (kts)
+ *   I  Aircraft 2
+ *   J  Latitude 2
+ *   K  Longitude 2
+ *   L  Altitude 2 (ft)
+ *   M  IAS 2 (kts)
+ *   N  Min Distance (ft)
+ *   O  Total Near-Miss Events This Month (row 1 only)
  */
 public class NearMissExcelWriter {
 
     private static final String[] HEADERS = {
             "Local Date",
-            "Local Time",
+            "Start Time",
+            "Duration (sec)",
             "Aircraft 1",
             "Latitude 1",
             "Longitude 1",
@@ -50,7 +54,7 @@ public class NearMissExcelWriter {
             "Longitude 2",
             "Altitude 2 (ft)",
             "IAS 2 (kts)",
-            "Distance (ft)",
+            "Min Distance (ft)",
             "Total Near-Miss Events This Month"
     };
 
@@ -119,7 +123,7 @@ public class NearMissExcelWriter {
             CellStyle altLatLon   = buildLatLonStyle(wb, IndexedColors.LIGHT_YELLOW);
             CellStyle altNum      = buildNumStyle(wb, IndexedColors.LIGHT_YELLOW);
 
-            // Data rows -- one row per near-miss second
+            // Data rows -- one row per aggregated near-miss event
             int rowNum = 1;
             for (NearMissEvent ev : events) {
                 Row row      = sheet.createRow(rowNum);
@@ -128,22 +132,23 @@ public class NearMissExcelWriter {
                 CellStyle csLL = isAlt ? altLatLon : latLonStyle;
                 CellStyle csN  = isAlt ? altNum    : numStyle;
 
-                createStrCell(row, 0,  ev.date,        cs);
-                createStrCell(row, 1,  ev.time,        cs);
-                createStrCell(row, 2,  tail1,          cs);
-                createNumCell(row, 3,  ev.lat1,        csLL);
-                createNumCell(row, 4,  ev.lon1,        csLL);
-                createNumCell(row, 5,  ev.alt1,        csN);
-                createNumCell(row, 6,  ev.ias1,        csN);
-                createStrCell(row, 7,  tail2,          cs);
-                createNumCell(row, 8,  ev.lat2,        csLL);
-                createNumCell(row, 9,  ev.lon2,        csLL);
-                createNumCell(row, 10, ev.alt2,        csN);
-                createNumCell(row, 11, ev.ias2,        csN);
-                createNumCell(row, 12, ev.distanceFt,  csN);
+                createStrCell(row, 0,  ev.date,              cs);
+                createStrCell(row, 1,  ev.startTime,         cs);
+                createIntCell(row, 2,  (int) ev.durationSeconds, cs);
+                createStrCell(row, 3,  tail1,                cs);
+                createNumCell(row, 4,  ev.lat1,              csLL);
+                createNumCell(row, 5,  ev.lon1,              csLL);
+                createNumCell(row, 6,  ev.alt1,              csN);
+                createNumCell(row, 7,  ev.ias1,              csN);
+                createStrCell(row, 8,  tail2,                cs);
+                createNumCell(row, 9,  ev.lat2,              csLL);
+                createNumCell(row, 10, ev.lon2,              csLL);
+                createNumCell(row, 11, ev.alt2,              csN);
+                createNumCell(row, 12, ev.ias2,              csN);
+                createNumCell(row, 13, ev.minDistanceFt,     csN);
 
-                // Col N: total events this month -- row 1 only
-                if (rowNum == 1) createIntCell(row, 13, events.size(), cs);
+                // Col O: total events this month -- row 1 only
+                if (rowNum == 1) createIntCell(row, 14, events.size(), cs);
 
                 rowNum++;
             }

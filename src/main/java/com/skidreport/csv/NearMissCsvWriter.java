@@ -24,17 +24,17 @@ import java.util.List;
 public final class NearMissCsvWriter {
 
     private static final String[] MIRROR_HEADERS = {
-            "Local Date", "Local Time",
+            "Local Date", "Start Time", "Duration (sec)",
             "Aircraft 1", "Latitude 1", "Longitude 1", "Altitude 1 (ft)", "IAS 1 (kts)",
             "Aircraft 2", "Latitude 2", "Longitude 2", "Altitude 2 (ft)", "IAS 2 (kts)",
-            "Distance (ft)", "Total Near-Miss Events This Month"
+            "Min Distance (ft)", "Total Near-Miss Events This Month"
     };
 
     private static final String[] CONSOLIDATED_HEADERS = {
-            "year_month", "local_date", "local_time",
+            "year_month", "local_date", "start_time", "duration_seconds",
             "tail1", "lat1", "lon1", "alt1_ft", "ias1_kts",
             "tail2", "lat2", "lon2", "alt2_ft", "ias2_kts",
-            "distance_ft", "pair_key"
+            "min_distance_ft", "pair_key"
     };
 
     private NearMissCsvWriter() {}
@@ -87,17 +87,17 @@ public final class NearMissCsvWriter {
                 Object totalThisMonth = (rowNum == 1) ? Integer.valueOf(events.size()) : "";
 
                 CsvWriterUtil.writeRow(w, new Object[]{
-                        ev.date, ev.time,
+                        ev.date, ev.startTime, ev.durationSeconds,
                         tail1, ev.lat1, ev.lon1, ev.alt1, ev.ias1,
                         tail2, ev.lat2, ev.lon2, ev.alt2, ev.ias2,
-                        ev.distanceFt, totalThisMonth
+                        ev.minDistanceFt, totalThisMonth
                 });
 
                 CsvWriterUtil.writeRow(pbi, new Object[]{
-                        yearMonth, ev.date, ev.time,
+                        yearMonth, ev.date, ev.startTime, ev.durationSeconds,
                         tail1, ev.lat1, ev.lon1, ev.alt1, ev.ias1,
                         tail2, ev.lat2, ev.lon2, ev.alt2, ev.ias2,
-                        ev.distanceFt, pairKey
+                        ev.minDistanceFt, pairKey
                 });
                 rowNum++;
             }

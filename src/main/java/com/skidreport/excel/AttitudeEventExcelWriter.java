@@ -27,15 +27,21 @@ public class AttitudeEventExcelWriter {
 
     private static final String[] BANK_HEADERS = {
             "Tail", "Date", "Start Time", "End Time",
-            "Duration (s)", "Peak Roll (deg)", "Trigger Count"
+            "Duration (s)", "Peak Roll (deg)", "Trigger Count",
+            "Total Bank Events"
     };
 
     private static final String[] HIGH_PITCH_HEADERS = {
             "Tail", "Date", "Start Time", "End Time",
-            "Duration (s)", "Peak Pitch (deg)", "Trigger Count"
+            "Duration (s)", "Peak Pitch (deg)", "Trigger Count",
+            "Total High Pitch Events"
     };
 
-    private static final String[] LOW_PITCH_HEADERS = HIGH_PITCH_HEADERS;
+    private static final String[] LOW_PITCH_HEADERS = {
+            "Tail", "Date", "Start Time", "End Time",
+            "Duration (s)", "Peak Pitch (deg)", "Trigger Count",
+            "Total Low Pitch Events"
+    };
 
     /**
      * Write one workbook for one (tail, yearMonth).
@@ -112,6 +118,8 @@ public class AttitudeEventExcelWriter {
             createIntCell(row, 4, (int) ev.durationSeconds, cs);
             createNumCell(row, 5, ev.peakValue,        csN);
             createIntCell(row, 6, ev.triggerCount,     cs);
+
+            if (rowNum == 1) createIntCell(row, 7, events.size(), cs);
 
             rowNum++;
         }

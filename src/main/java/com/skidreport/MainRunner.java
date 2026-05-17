@@ -45,15 +45,11 @@ public class MainRunner {
         System.out.println("##############################################");
         AttitudeEventReportGenerator.main(args);
 
-        // Near-miss is currently SKIPPED while the Friday-deadline reports
-        // (skid + bank/pitch) are being iterated on. To re-enable, uncomment
-        // the block below or run NearMissReportGenerator.main(...) directly.
-        //
-        // System.out.println();
-        // System.out.println("##############################################");
-        // System.out.println("#     NEAR MISS REPORT GENERATOR             #");
-        // System.out.println("##############################################");
-        // NearMissReportGenerator.main(args);
+        System.out.println();
+        System.out.println("##############################################");
+        System.out.println("#     NEAR MISS REPORT GENERATOR             #");
+        System.out.println("##############################################");
+        NearMissReportGenerator.main(args);
 
         System.out.println();
         System.out.println("##############################################");

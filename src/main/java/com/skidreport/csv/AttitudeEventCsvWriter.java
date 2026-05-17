@@ -27,18 +27,20 @@ import java.util.List;
 public final class AttitudeEventCsvWriter {
 
     public enum Type {
-        BANK("Bank",       "bank_events.csv",       "Peak Roll (deg)"),
-        HIGH("HighPitch",  "high_pitch_events.csv", "Peak Pitch (deg)"),
-        LOW ("LowPitch",   "low_pitch_events.csv",  "Peak Pitch (deg)");
+        BANK("Bank",       "bank_events.csv",       "Peak Roll (deg)",  "Total Bank Events"),
+        HIGH("HighPitch",  "high_pitch_events.csv", "Peak Pitch (deg)", "Total High Pitch Events"),
+        LOW ("LowPitch",   "low_pitch_events.csv",  "Peak Pitch (deg)", "Total Low Pitch Events");
 
         public final String filePrefix;
         public final String pbiFileName;
         public final String peakHeader;
+        public final String totalHeader;
 
-        Type(String filePrefix, String pbiFileName, String peakHeader) {
+        Type(String filePrefix, String pbiFileName, String peakHeader, String totalHeader) {
             this.filePrefix  = filePrefix;
             this.pbiFileName = pbiFileName;
             this.peakHeader  = peakHeader;
+            this.totalHeader = totalHeader;
         }
     }
 
@@ -114,16 +116,21 @@ public final class AttitudeEventCsvWriter {
 
         String[] mirrorHeaders = {
                 "Tail", "Date", "Start Time", "End Time",
-                "Duration (s)", type.peakHeader, "Trigger Count"
+                "Duration (s)", type.peakHeader, "Trigger Count",
+                type.totalHeader
         };
 
         try (BufferedWriter w = CsvWriterUtil.open(outFile)) {
             CsvWriterUtil.writeHeader(w, mirrorHeaders);
 
+            int rowNum = 1;
             for (AttitudeEvent ev : events) {
+                Object totalEvents = (rowNum == 1) ? Integer.valueOf(events.size()) : "";
+
                 CsvWriterUtil.writeRow(w, new Object[]{
                         ev.tail, ev.date, ev.startTime, ev.endTime,
-                        (int) ev.durationSeconds, ev.peakValue, ev.triggerCount
+                        (int) ev.durationSeconds, ev.peakValue, ev.triggerCount,
+                        totalEvents
                 });
 
                 if (pbi != null) {
@@ -133,6 +140,7 @@ public final class AttitudeEventCsvWriter {
                             (int) ev.durationSeconds, ev.peakValue, ev.triggerCount
                     });
                 }
+                rowNum++;
             }
 
             System.out.printf("    CSV: %s  [%d event(s)]%n",

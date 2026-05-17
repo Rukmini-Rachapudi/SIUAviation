@@ -48,25 +48,28 @@ public class DatabaseManager {
 
             // ----------------------------------------------------------------
             // TABLE: near_miss_events
-            // One row per qualifying second per aircraft pair
+            // One row per aggregated event (run of consecutive qualifying seconds)
+            // per aircraft pair. lat/lon/alt/ias capture the closest-approach
+            // snapshot inside the event window.
             // ----------------------------------------------------------------
             st.execute(
                 "CREATE TABLE near_miss_events ("                         +
-                "  id          INTEGER PRIMARY KEY AUTOINCREMENT,"        +
-                "  local_date  TEXT    NOT NULL,"                         +
-                "  local_time  TEXT    NOT NULL,"                         +
-                "  tail1       TEXT    NOT NULL,"                         +
-                "  tail2       TEXT    NOT NULL,"                         +
-                "  latitude1   REAL,"                                     +
-                "  longitude1  REAL,"                                     +
-                "  alt1        REAL,"                                     +
-                "  ias1        REAL,"                                     +
-                "  latitude2   REAL,"                                     +
-                "  longitude2  REAL,"                                     +
-                "  alt2        REAL,"                                     +
-                "  ias2        REAL,"                                     +
-                "  distance_ft REAL,"                                     +
-                "  year_month  TEXT"                                      +
+                "  id               INTEGER PRIMARY KEY AUTOINCREMENT,"   +
+                "  local_date       TEXT    NOT NULL,"                    +
+                "  start_time       TEXT    NOT NULL,"                    +
+                "  duration_seconds INTEGER NOT NULL,"                    +
+                "  tail1            TEXT    NOT NULL,"                    +
+                "  tail2            TEXT    NOT NULL,"                    +
+                "  latitude1        REAL,"                                +
+                "  longitude1       REAL,"                                +
+                "  alt1             REAL,"                                +
+                "  ias1             REAL,"                                +
+                "  latitude2        REAL,"                                +
+                "  longitude2       REAL,"                                +
+                "  alt2             REAL,"                                +
+                "  ias2             REAL,"                                +
+                "  min_distance_ft  REAL,"                                +
+                "  year_month       TEXT"                                 +
                 ")"
             );
 

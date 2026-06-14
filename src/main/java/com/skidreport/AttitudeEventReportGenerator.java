@@ -4,7 +4,6 @@ import com.skidreport.csv.AttitudeEventCsvWriter;
 import com.skidreport.detect.AttitudeEventDetector;
 import com.skidreport.excel.AttitudeEventExcelWriter;
 import com.skidreport.model.AttitudeEvent;
-import com.skidreport.model.FlightRecord;
 import com.skidreport.util.CsvParser;
 import com.skidreport.util.DateUtils;
 
@@ -161,12 +160,11 @@ public class AttitudeEventReportGenerator {
 
             for (File csv : batch) {
                 try {
-                    List<FlightRecord> records = CsvParser.parseAttitudeCsvFile(csv);
-                    for (FlightRecord rec : records) {
+                    CsvParser.streamAttitudeCsvFile(csv, rec -> {
                         bank.accept(rec);
                         high.accept(rec);
                         low.accept(rec);
-                    }
+                    });
                 } catch (Exception e) {
                     System.err.println("    [WARN] Skipping " + csv.getName() + ": " + e.getMessage());
                 }

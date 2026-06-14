@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(winget search Maven --source winget 2>&1 | Select-Object -Last 20; \"EXIT=$LASTEXITCODE\")",
+      "Bash(git commit -m ' *)",
+      "Bash(mvn -q -o compile)",
+      "Bash(mvn -o compile)",
+      "Bash(mvn -o clean compile)",
+      "Bash(mvn -o clean install)",
+      "Bash(mvn -DskipTests compile)",
+      "Bash(mvn -DskipTests clean compile)",
+      "PowerShell(git commit -F .git/COMMIT_MSG_TMP.txt)",
+      "PowerShell(mvn -DskipTests compile 2>&1)",
+      "PowerShell(mvn -DskipTests clean compile 2>&1)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\SIU950304093\\Desktop\\SkidsReports\\.git"
+    ]
+  }
+}

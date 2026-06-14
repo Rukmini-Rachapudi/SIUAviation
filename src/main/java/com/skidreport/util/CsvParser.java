@@ -3,19 +3,31 @@ package com.skidreport.util;
 import com.skidreport.model.FlightRecord;
 import com.skidreport.model.NearMissFlightRecord;
 
-import java.io.*;
-import java.util.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * CsvParser
  *
  * All CSV file collection and parsing logic.
+ *
  * CSV structure (same for all files):
  *   Row 0 = metadata
  *   Row 1 = units
  *   Row 2 = column headers
  *   Row 3+ = data rows
  *   Last row = footer (skipped)
+ *
+ * Parsing is streaming: each file is read one line at a time via BufferedReader
+ * and records are emitted to the caller's Consumer as they are parsed. The full
+ * file is never held in memory.
  */
 public class CsvParser {
 
@@ -73,147 +85,169 @@ public class CsvParser {
     }
 
     // ========================================================================
-    // PARSE SKID CSV
-    // Returns list of FlightRecord for skid report processing.
+    // STREAM SKID CSV
+    // Emits one FlightRecord per qualifying data row.
     // ========================================================================
-    public static List<FlightRecord> parseSkidCsvFile(File file) throws IOException {
-        List<String> lines = readLines(file);
-        if (lines.size() < 4) return Collections.emptyList();
-
-        Map<String, Integer> colIndex = buildColIndex(lines.get(2));
-
-        for (String req : SKID_REQUIRED_COLS) {
-            if (!colIndex.containsKey(req)) {
-                System.out.println("    Skipping " + file.getName() + " -- missing column: " + req);
-                return Collections.emptyList();
-            }
-        }
-
-        List<FlightRecord> records = new ArrayList<>();
-        int lastDataLine = lines.size() - 1;
-        for (int i = 3; i < lastDataLine; i++) {
-            String line = lines.get(i).trim();
-            if (line.isEmpty()) continue;
-            String[] cols = splitCsv(line);
-            try {
-                String date = getCol(cols, colIndex, H_DATE).trim();
-                String time = getCol(cols, colIndex, H_TIME).trim();
-                if (date.isEmpty() || time.isEmpty()) continue;
-
-                FlightRecord rec = new FlightRecord();
-                rec.date  = date;
-                rec.time  = time;
-                rec.pitch = parseDouble(getCol(cols, colIndex, H_PITCH));
-                rec.roll  = parseDouble(getCol(cols, colIndex, H_ROLL));
-                rec.latAc = parseDouble(getCol(cols, colIndex, H_LATAC));
-                rec.ias   = parseDouble(getCol(cols, colIndex, H_IAS));
-                rec.alt   = parseDouble(getCol(cols, colIndex, H_ALT));
-
-                if (!Double.isNaN(rec.roll) && !Double.isNaN(rec.latAc)) {
-                    records.add(rec);
-                }
-            } catch (Exception ignored) {}
-        }
-        return records;
-    }
-
-    // ========================================================================
-    // PARSE ATTITUDE CSV
-    // Returns FlightRecord with only date/time/pitch/roll populated.
-    // AltMSL / IAS / LatAc are optional -- this lets us process older logs
-    // that omit AltMSL but still contain Pitch and Roll.
-    // ========================================================================
-    public static List<FlightRecord> parseAttitudeCsvFile(File file) throws IOException {
-        List<String> lines = readLines(file);
-        if (lines.size() < 4) return Collections.emptyList();
-
-        Map<String, Integer> colIndex = buildColIndex(lines.get(2));
-
-        for (String req : ATTITUDE_REQUIRED_COLS) {
-            if (!colIndex.containsKey(req)) {
-                System.out.println("    Skipping " + file.getName() + " -- missing column: " + req);
-                return Collections.emptyList();
-            }
-        }
-
-        List<FlightRecord> records = new ArrayList<>();
-        int lastDataLine = lines.size() - 1;
-        for (int i = 3; i < lastDataLine; i++) {
-            String line = lines.get(i).trim();
-            if (line.isEmpty()) continue;
-            String[] cols = splitCsv(line);
-            try {
-                String date = getCol(cols, colIndex, H_DATE).trim();
-                String time = getCol(cols, colIndex, H_TIME).trim();
-                if (date.isEmpty() || time.isEmpty()) continue;
-
-                FlightRecord rec = new FlightRecord();
-                rec.date  = date;
-                rec.time  = time;
-                rec.pitch = parseDouble(getCol(cols, colIndex, H_PITCH));
-                rec.roll  = parseDouble(getCol(cols, colIndex, H_ROLL));
-
-                if (!Double.isNaN(rec.pitch) && !Double.isNaN(rec.roll)) {
-                    records.add(rec);
-                }
-            } catch (Exception ignored) {}
-        }
-        return records;
-    }
-
-    // ========================================================================
-    // PARSE NEAR MISS CSV
-    // Returns list of NearMissFlightRecord for near-miss processing.
-    // ========================================================================
-    public static List<NearMissFlightRecord> parseNearMissCsvFile(File file, String tail)
+    public static void streamSkidCsvFile(File file, Consumer<FlightRecord> sink)
             throws IOException {
 
-        List<String> lines = readLines(file);
-        if (lines.size() < 4) return Collections.emptyList();
+        try (BufferedReader br = openReader(file)) {
+            Map<String, Integer> colIndex =
+                    readHeaderAndValidate(br, file, SKID_REQUIRED_COLS);
+            if (colIndex == null) return;
 
-        Map<String, Integer> colIndex = buildColIndex(lines.get(2));
+            streamDataRows(br, line -> {
+                String[] cols = splitCsv(line);
+                try {
+                    String date = getCol(cols, colIndex, H_DATE).trim();
+                    String time = getCol(cols, colIndex, H_TIME).trim();
+                    if (date.isEmpty() || time.isEmpty()) return;
 
-        for (String req : NEAR_MISS_REQUIRED_COLS) {
-            if (!colIndex.containsKey(req)) {
-                System.out.println("    Skipping " + file.getName() + " -- missing column: " + req);
-                return Collections.emptyList();
-            }
+                    FlightRecord rec = new FlightRecord();
+                    rec.date  = date;
+                    rec.time  = time;
+                    rec.pitch = parseDouble(getCol(cols, colIndex, H_PITCH));
+                    rec.roll  = parseDouble(getCol(cols, colIndex, H_ROLL));
+                    rec.latAc = parseDouble(getCol(cols, colIndex, H_LATAC));
+                    rec.ias   = parseDouble(getCol(cols, colIndex, H_IAS));
+                    rec.alt   = parseDouble(getCol(cols, colIndex, H_ALT));
+
+                    if (!Double.isNaN(rec.roll) && !Double.isNaN(rec.latAc)) {
+                        sink.accept(rec);
+                    }
+                } catch (Exception ignored) {}
+            });
         }
+    }
 
-        List<NearMissFlightRecord> records = new ArrayList<>();
-        int lastDataLine = lines.size() - 1;
-        for (int i = 3; i < lastDataLine; i++) {
-            String line = lines.get(i).trim();
-            if (line.isEmpty()) continue;
-            String[] cols = splitCsv(line);
-            try {
-                String date = getCol(cols, colIndex, H_DATE).trim();
-                String time = getCol(cols, colIndex, H_TIME).trim();
-                if (date.isEmpty() || time.isEmpty()) continue;
+    // ========================================================================
+    // STREAM ATTITUDE CSV
+    // Emits one FlightRecord (date/time/pitch/roll) per qualifying row.
+    // AltMSL / IAS / LatAc are optional so older logs that omit them still work.
+    // ========================================================================
+    public static void streamAttitudeCsvFile(File file, Consumer<FlightRecord> sink)
+            throws IOException {
 
-                NearMissFlightRecord rec = new NearMissFlightRecord();
-                rec.tail = tail;
-                rec.date = date;
-                rec.time = DateUtils.normalizeTime(time);
-                rec.lat  = parseDouble(getCol(cols, colIndex, H_LAT));
-                rec.lon  = parseDouble(getCol(cols, colIndex, H_LON));
-                rec.alt  = parseDouble(getCol(cols, colIndex, H_ALT));
-                rec.ias  = parseDouble(getCol(cols, colIndex, H_IAS));
-                rec.rpm  = parseDouble(getCol(cols, colIndex, H_RPM));
+        try (BufferedReader br = openReader(file)) {
+            Map<String, Integer> colIndex =
+                    readHeaderAndValidate(br, file, ATTITUDE_REQUIRED_COLS);
+            if (colIndex == null) return;
 
-                if (Double.isNaN(rec.lat) || Double.isNaN(rec.lon)
-                        || Double.isNaN(rec.alt) || Double.isNaN(rec.ias)
-                        || Double.isNaN(rec.rpm)) continue;
+            streamDataRows(br, line -> {
+                String[] cols = splitCsv(line);
+                try {
+                    String date = getCol(cols, colIndex, H_DATE).trim();
+                    String time = getCol(cols, colIndex, H_TIME).trim();
+                    if (date.isEmpty() || time.isEmpty()) return;
 
-                records.add(rec);
-            } catch (Exception ignored) {}
+                    FlightRecord rec = new FlightRecord();
+                    rec.date  = date;
+                    rec.time  = time;
+                    rec.pitch = parseDouble(getCol(cols, colIndex, H_PITCH));
+                    rec.roll  = parseDouble(getCol(cols, colIndex, H_ROLL));
+
+                    if (!Double.isNaN(rec.pitch) && !Double.isNaN(rec.roll)) {
+                        sink.accept(rec);
+                    }
+                } catch (Exception ignored) {}
+            });
         }
-        return records;
+    }
+
+    // ========================================================================
+    // STREAM NEAR MISS CSV
+    // Emits one NearMissFlightRecord per qualifying row.
+    // ========================================================================
+    public static void streamNearMissCsvFile(File file, String tail,
+                                             Consumer<NearMissFlightRecord> sink)
+            throws IOException {
+
+        try (BufferedReader br = openReader(file)) {
+            Map<String, Integer> colIndex =
+                    readHeaderAndValidate(br, file, NEAR_MISS_REQUIRED_COLS);
+            if (colIndex == null) return;
+
+            streamDataRows(br, line -> {
+                String[] cols = splitCsv(line);
+                try {
+                    String date = getCol(cols, colIndex, H_DATE).trim();
+                    String time = getCol(cols, colIndex, H_TIME).trim();
+                    if (date.isEmpty() || time.isEmpty()) return;
+
+                    NearMissFlightRecord rec = new NearMissFlightRecord();
+                    rec.tail = tail;
+                    rec.date = date;
+                    rec.time = DateUtils.normalizeTime(time);
+                    rec.lat  = parseDouble(getCol(cols, colIndex, H_LAT));
+                    rec.lon  = parseDouble(getCol(cols, colIndex, H_LON));
+                    rec.alt  = parseDouble(getCol(cols, colIndex, H_ALT));
+                    rec.ias  = parseDouble(getCol(cols, colIndex, H_IAS));
+                    rec.rpm  = parseDouble(getCol(cols, colIndex, H_RPM));
+
+                    if (Double.isNaN(rec.lat) || Double.isNaN(rec.lon)
+                            || Double.isNaN(rec.alt) || Double.isNaN(rec.ias)
+                            || Double.isNaN(rec.rpm)) return;
+
+                    sink.accept(rec);
+                } catch (Exception ignored) {}
+            });
+        }
     }
 
     // ========================================================================
     // INTERNAL HELPERS
     // ========================================================================
+
+    private static BufferedReader openReader(File file) throws IOException {
+        return new BufferedReader(
+                new InputStreamReader(new FileInputStream(file), "ISO-8859-1"));
+    }
+
+    /**
+     * Skips the metadata and units rows, parses the header row, and verifies
+     * every required column is present. Returns the column-index map on
+     * success, or {@code null} if a required column is missing (a warning is
+     * printed in that case).
+     */
+    private static Map<String, Integer> readHeaderAndValidate(
+            BufferedReader br, File file, String[] requiredCols) throws IOException {
+
+        br.readLine(); // row 0: metadata
+        br.readLine(); // row 1: units
+        String headerLine = br.readLine();
+        if (headerLine == null) return null;
+
+        Map<String, Integer> colIndex = buildColIndex(headerLine);
+        for (String req : requiredCols) {
+            if (!colIndex.containsKey(req)) {
+                System.out.println("    Skipping " + file.getName()
+                        + " -- missing column: " + req);
+                return null;
+            }
+        }
+        return colIndex;
+    }
+
+    /**
+     * Reads data rows from the current reader position to EOF, calling
+     * {@code rowSink} for each line EXCEPT the final line (which is the
+     * footer). Blank lines are skipped. Uses one-line lookahead so we never
+     * hold more than two lines in memory at a time.
+     */
+    private static void streamDataRows(BufferedReader br, Consumer<String> rowSink)
+            throws IOException {
+
+        String prev = br.readLine();
+        if (prev == null) return;
+
+        String next;
+        while ((next = br.readLine()) != null) {
+            String trimmed = prev.trim();
+            if (!trimmed.isEmpty()) rowSink.accept(trimmed);
+            prev = next;
+        }
+        // The final 'prev' is the footer row -- intentionally dropped.
+    }
 
     private static Map<String, Integer> buildColIndex(String headerLine) {
         String[] headers = splitCsv(headerLine);
@@ -222,16 +256,6 @@ public class CsvParser {
             colIndex.put(headers[i].trim(), i);
         }
         return colIndex;
-    }
-
-    private static List<String> readLines(File file) throws IOException {
-        List<String> lines = new ArrayList<>();
-        try (BufferedReader br = new BufferedReader(
-                new InputStreamReader(new FileInputStream(file), "ISO-8859-1"))) {
-            String line;
-            while ((line = br.readLine()) != null) lines.add(line);
-        }
-        return lines;
     }
 
     private static String[] splitCsv(String line) {

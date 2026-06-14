@@ -7,7 +7,6 @@ import com.skidreport.db.NearMissEventDao;
 import com.skidreport.excel.NearMissExcelWriter;
 import com.skidreport.model.AircraftSnapshot;
 import com.skidreport.model.NearMissEvent;
-import com.skidreport.model.NearMissFlightRecord;
 import com.skidreport.util.CsvParser;
 import com.skidreport.util.DateUtils;
 import com.skidreport.util.GeoUtils;
@@ -141,6 +140,10 @@ public class NearMissReportGenerator {
 
     // ------------------------------------------------------------------------
     // PHASE 2 HELPER: Load one aircraft's CSV files into SQLite
+    //
+    // Streams each CSV record straight into a single shared Inserter: parse
+    // -> trigger filter -> JDBC batch. No List<NearMissFlightRecord> is ever
+    // held, so memory stays flat regardless of how large any one file is.
     // ------------------------------------------------------------------------
     private static int loadAircraft(Connection conn, String tail, File tailDir)
             throws Exception {
@@ -155,32 +158,27 @@ public class NearMissReportGenerator {
 
         System.out.println("    CSV files: " + csvFiles.size());
 
-        int totalInserted = 0;
         int skipped = 0;
 
-        for (File csv : csvFiles) {
-            try {
-                List<NearMissFlightRecord> records = CsvParser.parseNearMissCsvFile(csv, tail);
-                List<NearMissFlightRecord> filtered = new ArrayList<>();
-
-                for (NearMissFlightRecord rec : records) {
-                    if (rec.ias <= MIN_IAS) continue;
-                    if (rec.alt <= MIN_ALT) continue;
-                    if (rec.rpm <= MIN_RPM) continue;
-                    filtered.add(rec);
+        try (FlightRecordDao.Inserter inserter = FlightRecordDao.beginInsert(conn)) {
+            for (File csv : csvFiles) {
+                try {
+                    CsvParser.streamNearMissCsvFile(csv, tail, rec -> {
+                        if (rec.ias <= MIN_IAS) return;
+                        if (rec.alt <= MIN_ALT) return;
+                        if (rec.rpm <= MIN_RPM) return;
+                        inserter.add(rec);
+                    });
+                } catch (Exception e) {
+                    skipped++;
+                    System.err.println("    [WARN] Skipping " + csv.getName()
+                            + ": " + e.getMessage());
                 }
-
-                FlightRecordDao.insertBatch(conn, filtered);
-                totalInserted += filtered.size();
-
-            } catch (Exception e) {
-                skipped++;
-                System.err.println("    [WARN] Skipping " + csv.getName() + ": " + e.getMessage());
             }
-        }
 
-        if (skipped > 0) System.out.println("    Skipped " + skipped + " file(s).");
-        return totalInserted;
+            if (skipped > 0) System.out.println("    Skipped " + skipped + " file(s).");
+            return inserter.total();
+        }
     }
 
     // ------------------------------------------------------------------------
@@ -202,7 +200,12 @@ public class NearMissReportGenerator {
         for (String date : dates) {
 
             Map<String, List<AircraftSnapshot>> byTime = new LinkedHashMap<>();
-            FlightRecordDao.loadByDate(conn, date, byTime);
+            int dupRowsSkipped = FlightRecordDao.loadByDate(conn, date, byTime);
+            if (dupRowsSkipped > 0) {
+                System.out.printf("  Date %s -- %d duplicate (tail, second) row(s) "
+                        + "skipped at load (overlapping flight logs).%n",
+                        date, dupRowsSkipped);
+            }
 
             // pairKey ("tail1|tail2", tails already alphabetized) -> in-progress event
             Map<String, ActiveEvent> active = new LinkedHashMap<>();
@@ -219,6 +222,12 @@ public class NearMissReportGenerator {
                     for (int j = i + 1; j < snaps.size(); j++) {
                         AircraftSnapshot a = snaps.get(i);
                         AircraftSnapshot b = snaps.get(j);
+
+                        // Near-miss is between TWO DIFFERENT aircraft. Skip
+                        // any same-tail pair defensively -- loadByDate already
+                        // dedupes (tail, second), but a guard here keeps the
+                        // detector correct if that ever regresses.
+                        if (a.tail.equals(b.tail)) continue;
 
                         AircraftSnapshot s1; AircraftSnapshot s2;
                         String tail1; String tail2;

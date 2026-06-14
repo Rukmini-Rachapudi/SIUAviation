@@ -3,7 +3,6 @@ package com.skidreport;
 import com.skidreport.csv.SkidCsvWriter;
 import com.skidreport.detect.SkidEventDetector;
 import com.skidreport.excel.SkidExcelWriter;
-import com.skidreport.model.FlightRecord;
 import com.skidreport.model.SkidEvent;
 import com.skidreport.util.CsvParser;
 import com.skidreport.util.DateUtils;
@@ -138,10 +137,7 @@ public class SkidReportGenerator {
 
             for (File csv : batch) {
                 try {
-                    List<FlightRecord> records = CsvParser.parseSkidCsvFile(csv);
-                    for (FlightRecord rec : records) {
-                        detector.accept(rec);
-                    }
+                    CsvParser.streamSkidCsvFile(csv, detector::accept);
                 } catch (Exception e) {
                     System.err.println("    [WARN] Skipping " + csv.getName() + ": " + e.getMessage());
                 }

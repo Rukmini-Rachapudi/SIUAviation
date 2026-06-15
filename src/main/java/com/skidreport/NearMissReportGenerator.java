@@ -38,7 +38,9 @@ import java.util.Map;
  * with different UTCOfst values still line up at the same corrected second.
  *
  * TRIGGERS (all must be true for both aircraft, applied per row before insert):
- *   IAS > 45 kts   AND   AltMSL > 1000 ft   AND   E1 RPM > 0
+ *   IAS > 45 kts   AND   AltMSL > 600 ft   AND   E1 RPM > 0
+ *   (600 ft MSL clears the ~411 ft fields, so ground/taxi/rollout rows are
+ *    excluded while every airborne event -- including pattern traffic -- is kept.)
  *
  * NEAR-MISS: straight-line 3D distance < 500 ft -- Haversine horizontal
  *            distance combined with the AltGPS vertical difference. Direction
@@ -53,13 +55,20 @@ public class NearMissReportGenerator {
 
     static final double NEAR_MISS_FEET = 500.0;
 
+    // Floor below which a "pair" cannot be two real aircraft: identical
+    // coordinates under two different tails give 0 ft, which is physically a
+    // collision -- in practice it is the same GPS track duplicated/mislabeled
+    // across tails. Anything under the floor is dropped as a data artifact
+    // (this is the answer to "how can the minimum distance be 0 feet?").
+    static final double MIN_SEPARATION_FEET = 1.0;
+
     // Eligibility filters (R2) applied per row, per aircraft, BEFORE insert.
     // A near-miss can only form when both aircraft independently passed all
     // three. AltMSL (barometric MSL) is the altitude floor; AltGPS is reserved
     // for the separation distance (R3).
     static final double MIN_IAS     = 45.0;     // IAS must be > 45 kt
     static final double MIN_RPM     = 0.0;      // E1 RPM must be > 0
-    static final double MIN_ALT_MSL = 1000.0;   // AltMSL must be > 1000 ft
+    static final double MIN_ALT_MSL = 600.0;    // AltMSL must be > 600 ft (clears ~411 ft fields)
 
     public static void main(String[] args) throws Exception {
 
@@ -160,12 +169,22 @@ public class NearMissReportGenerator {
     // ELIGIBILITY (R2): a row qualifies only if all three triggers hold.
     // Because this is applied before insert, a near-miss can only form when
     // both aircraft independently passed all three -- in particular AltMSL >
-    // 1000 keeps anything on or near the runway/ground out of every event.
+    // 600 keeps anything on or near the runway/ground out of every event.
     // ------------------------------------------------------------------------
     static boolean qualifies(NearMissFlightRecord rec) {
         return rec.ias > MIN_IAS
                 && rec.rpm > MIN_RPM
                 && rec.altMsl > MIN_ALT_MSL;
+    }
+
+    // ------------------------------------------------------------------------
+    // SEPARATION (R3): a reportable near-miss is closer than NEAR_MISS_FEET but
+    // not closer than MIN_SEPARATION_FEET. The lower bound rejects 0-ft readings
+    // produced when the same GPS track is duplicated across two tails -- two
+    // distinct aircraft can never share a position to the foot.
+    // ------------------------------------------------------------------------
+    static boolean isNearMissSeparation(double distFt) {
+        return distFt >= MIN_SEPARATION_FEET && distFt < NEAR_MISS_FEET;
     }
 
     // ------------------------------------------------------------------------
@@ -223,6 +242,7 @@ public class NearMissReportGenerator {
         System.out.println("  Processing " + dates.size() + " date(s)...");
 
         int totalEvents = 0;
+        int artifactPairsSkipped = 0;   // sub-foot (0 ft) duplicate-track readings
 
         for (String date : dates) {
 
@@ -270,7 +290,11 @@ public class NearMissReportGenerator {
                                 s1.lat, s1.lon, s1.alt,
                                 s2.lat, s2.lon, s2.alt);
 
-                        if (distFt >= NEAR_MISS_FEET) continue;
+                        if (!isNearMissSeparation(distFt)) {
+                            // Track the 0-ft duplicate-track case for visibility.
+                            if (distFt < MIN_SEPARATION_FEET) artifactPairsSkipped++;
+                            continue;
+                        }
 
                         String pairKey = tail1 + "|" + tail2;
                         ActiveEvent ae = active.get(pairKey);
@@ -318,6 +342,12 @@ public class NearMissReportGenerator {
             }
 
             System.out.printf("  Date %s -- %d event(s) found so far.%n", date, totalEvents);
+        }
+
+        if (artifactPairsSkipped > 0) {
+            System.out.printf("  Dropped %d sub-foot (0 ft) reading(s) as duplicate-track "
+                    + "artifacts -- two distinct aircraft cannot share a position.%n",
+                    artifactPairsSkipped);
         }
 
         return totalEvents;

@@ -8,7 +8,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * R2 eligibility: a row qualifies only if IAS > 45, E1 RPM > 0, and
- * AltMSL > 1000. In particular, ground/runway rows must never qualify so they
+ * AltMSL > 600. In particular, ground/runway rows must never qualify so they
  * can never appear in any near-miss event (ground-exclusion acceptance test).
  */
 public class NearMissEligibilityTest {
@@ -36,9 +36,9 @@ public class NearMissEligibilityTest {
     }
 
     @Test
-    public void altMslFloorIsStrict_at1000_excluded() {
-        assertFalse(NearMissReportGenerator.qualifies(rec(60.0, 2000.0, 1000.0)));
-        assertTrue(NearMissReportGenerator.qualifies(rec(60.0, 2000.0, 1000.1)));
+    public void altMslFloorIsStrict_at600_excluded() {
+        assertFalse(NearMissReportGenerator.qualifies(rec(60.0, 2000.0, 600.0)));
+        assertTrue(NearMissReportGenerator.qualifies(rec(60.0, 2000.0, 600.1)));
     }
 
     @Test

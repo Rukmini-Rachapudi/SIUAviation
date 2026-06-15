@@ -1,6 +1,11 @@
 package com.skidreport.util;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 
 /**
@@ -9,6 +14,73 @@ import java.time.format.DateTimeFormatter;
  * All date and time helper methods shared across skid and near-miss processing.
  */
 public class DateUtils {
+
+    // ------------------------------------------------------------------------
+    // TIMEZONE CORRECTION (near-miss)
+    //
+    // Garmin logs record (Lcl Date, Lcl Time) in whatever zone the row's
+    // UTCOfst claims -- and that offset varies between flights (some logs are
+    // labelled +00:00 i.e. UTC, others -05:00 / -06:00). To compare two
+    // aircraft that were at the same real instant we must first re-express
+    // every timestamp in the airport's true local zone.
+    //
+    // We use ZoneId.of("America/Chicago") rather than a hardcoded offset so
+    // the conversion stays correct across DST transitions and for any year,
+    // including pre-2024 logs.
+    // ------------------------------------------------------------------------
+    private static final ZoneId CENTRAL = ZoneId.of("America/Chicago");
+    private static final DateTimeFormatter HMS = DateTimeFormatter.ofPattern("HH:mm:ss");
+
+    /**
+     * Corrects a recorded (Lcl Date, Lcl Time) stamped with {@code utcOfst} to
+     * the true local wall-clock time at the airport (America/Chicago).
+     *
+     * Steps: parse the offset, combine date+time+offset into a single instant,
+     * then re-express that instant in Central time. Correcting to Central can
+     * legitimately shift the date near midnight -- callers must bucket by the
+     * returned (corrected) date.
+     *
+     * @param lclDate recorded local date, "yyyy-MM-dd"
+     * @param lclTime recorded local time, "hh:mm:ss" (or "hh:mm")
+     * @param utcOfst the offset the row claims, "+hh:mm" / "-hh:mm" (or "Z")
+     * @return the corrected date+time in America/Chicago
+     */
+    public static LocalDateTime correctToCentral(String lclDate, String lclTime, String utcOfst) {
+        ZoneOffset offset = parseOffset(utcOfst);
+        LocalDate date = LocalDate.parse(lclDate.trim());          // ISO yyyy-MM-dd
+        LocalTime time = LocalTime.parse(normalizeTime(lclTime));  // ISO HH:mm:ss
+        return OffsetDateTime.of(date, time, offset)
+                .atZoneSameInstant(CENTRAL)
+                .toLocalDateTime();
+    }
+
+    /** Formats a LocalTime as "HH:mm:ss" (zero-padded), matching stored keys. */
+    public static String toHms(LocalTime time) {
+        return time.format(HMS);
+    }
+
+    /**
+     * Parses a Garmin UTCOfst field ("+hh:mm", "-hh:mm", or "Z") into a
+     * ZoneOffset. Throws if the string is blank or malformed so the caller's
+     * per-row guard skips the (un-correctable) row.
+     */
+    public static ZoneOffset parseOffset(String utcOfst) {
+        if (utcOfst == null) throw new IllegalArgumentException("null UTCOfst");
+        String s = utcOfst.trim();
+        if (s.isEmpty()) throw new IllegalArgumentException("blank UTCOfst");
+        if (s.equalsIgnoreCase("Z")) return ZoneOffset.UTC;
+
+        int sign = 1;
+        char c0 = s.charAt(0);
+        if (c0 == '+') { s = s.substring(1); }
+        else if (c0 == '-') { sign = -1; s = s.substring(1); }
+
+        String[] p = s.split(":");
+        int hh = Integer.parseInt(p[0].trim());
+        int mm = p.length > 1 ? Integer.parseInt(p[1].trim()) : 0;
+        int ss = p.length > 2 ? Integer.parseInt(p[2].trim()) : 0;
+        return ZoneOffset.ofHoursMinutesSeconds(sign * hh, sign * mm, sign * ss);
+    }
 
     /**
      * Today's run-date folder name, e.g. "11-may-2026".

@@ -5,9 +5,9 @@ package com.skidreport.model;
  * Used during near-miss pairwise comparison.
  */
 public class AircraftSnapshot {
-    public String tail;
+    public String tail;   // canonical tail (see TailNumbers)
     public double lat;
     public double lon;
-    public double alt;
+    public double alt;    // AltGPS (ft) -- WGS-84 GPS altitude, used for 3D separation distance
     public double ias;
 }

@@ -51,12 +51,16 @@ public class CsvParser {
     };
 
     // -- Near miss column names ----------------------------------------------
-    private static final String H_LAT = "Latitude";
-    private static final String H_LON = "Longitude";
-    private static final String H_RPM = "E1 RPM";
+    private static final String H_LAT     = "Latitude";
+    private static final String H_LON     = "Longitude";
+    private static final String H_RPM     = "E1 RPM";
+    private static final String H_UTCOFST = "UTCOfst";  // row's claimed offset, ±hh:mm
+    private static final String H_ALT_GPS = "AltGPS";   // WGS-84 GPS altitude, used for 3D distance
 
+    // AltMSL is the altitude floor (R2); AltGPS is the separation altitude (R3);
+    // UTCOfst is required so every timestamp can be corrected to Central time (R1).
     private static final String[] NEAR_MISS_REQUIRED_COLS = {
-            H_DATE, H_TIME, H_LAT, H_LON, H_ALT, H_IAS, H_RPM
+            H_DATE, H_TIME, H_UTCOFST, H_LAT, H_LON, H_ALT, H_ALT_GPS, H_IAS, H_RPM
     };
 
     // ========================================================================
@@ -170,23 +174,33 @@ public class CsvParser {
             streamDataRows(br, line -> {
                 String[] cols = splitCsv(line);
                 try {
-                    String date = getCol(cols, colIndex, H_DATE).trim();
-                    String time = getCol(cols, colIndex, H_TIME).trim();
-                    if (date.isEmpty() || time.isEmpty()) return;
+                    String date   = getCol(cols, colIndex, H_DATE).trim();
+                    String time   = getCol(cols, colIndex, H_TIME).trim();
+                    String offset = getCol(cols, colIndex, H_UTCOFST).trim();
+                    // Pre-GPS / NoSoln rows blank these out -- skip; they must
+                    // never reach the detector (and can't be time-corrected).
+                    if (date.isEmpty() || time.isEmpty() || offset.isEmpty()) return;
 
                     NearMissFlightRecord rec = new NearMissFlightRecord();
                     rec.tail = tail;
-                    rec.date = date;
-                    rec.time = DateUtils.normalizeTime(time);
-                    rec.lat  = parseDouble(getCol(cols, colIndex, H_LAT));
-                    rec.lon  = parseDouble(getCol(cols, colIndex, H_LON));
-                    rec.alt  = parseDouble(getCol(cols, colIndex, H_ALT));
-                    rec.ias  = parseDouble(getCol(cols, colIndex, H_IAS));
-                    rec.rpm  = parseDouble(getCol(cols, colIndex, H_RPM));
+
+                    // R1: correct the recorded timestamp to true Central local
+                    // time before anything downstream uses date/time.
+                    java.time.LocalDateTime corrected =
+                            DateUtils.correctToCentral(date, time, offset);
+                    rec.date = corrected.toLocalDate().toString();        // yyyy-MM-dd
+                    rec.time = DateUtils.toHms(corrected.toLocalTime());  // HH:MM:SS
+
+                    rec.lat    = parseDouble(getCol(cols, colIndex, H_LAT));
+                    rec.lon    = parseDouble(getCol(cols, colIndex, H_LON));
+                    rec.altMsl = parseDouble(getCol(cols, colIndex, H_ALT));      // floor filter (R2)
+                    rec.altGps = parseDouble(getCol(cols, colIndex, H_ALT_GPS));  // 3D distance (R3)
+                    rec.ias    = parseDouble(getCol(cols, colIndex, H_IAS));
+                    rec.rpm    = parseDouble(getCol(cols, colIndex, H_RPM));
 
                     if (Double.isNaN(rec.lat) || Double.isNaN(rec.lon)
-                            || Double.isNaN(rec.alt) || Double.isNaN(rec.ias)
-                            || Double.isNaN(rec.rpm)) return;
+                            || Double.isNaN(rec.altMsl) || Double.isNaN(rec.altGps)
+                            || Double.isNaN(rec.ias) || Double.isNaN(rec.rpm)) return;
 
                     sink.accept(rec);
                 } catch (Exception ignored) {}
@@ -230,23 +244,25 @@ public class CsvParser {
 
     /**
      * Reads data rows from the current reader position to EOF, calling
-     * {@code rowSink} for each line EXCEPT the final line (which is the
-     * footer). Blank lines are skipped. Uses one-line lookahead so we never
-     * hold more than two lines in memory at a time.
+     * {@code rowSink} for every non-blank line EXCEPT the final non-blank one.
+     * The last data line of a Garmin log is a footer (and is frequently a row
+     * truncated mid-write), so it is always dropped -- and dropped correctly
+     * even when the file ends with one or more trailing blank lines, by holding
+     * each non-blank line back until we know it is not the last. At most two
+     * lines are held in memory at a time.
      */
     private static void streamDataRows(BufferedReader br, Consumer<String> rowSink)
             throws IOException {
 
-        String prev = br.readLine();
-        if (prev == null) return;
-
-        String next;
-        while ((next = br.readLine()) != null) {
-            String trimmed = prev.trim();
-            if (!trimmed.isEmpty()) rowSink.accept(trimmed);
-            prev = next;
+        String pending = null;   // last non-blank line seen, held back as the footer candidate
+        String line;
+        while ((line = br.readLine()) != null) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) continue;            // skip blank lines entirely
+            if (pending != null) rowSink.accept(pending);
+            pending = trimmed;
         }
-        // The final 'prev' is the footer row -- intentionally dropped.
+        // 'pending' is now the final non-blank line (footer/partial) -- dropped.
     }
 
     private static Map<String, Integer> buildColIndex(String headerLine) {

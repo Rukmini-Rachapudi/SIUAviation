@@ -21,7 +21,7 @@ public class FlightRecordDao {
 
     private static final String INSERT_SQL =
         "INSERT INTO flight_records " +
-        "  (tail, local_date, local_time, latitude, longitude, alt_msl, ias, e1_rpm) " +
+        "  (tail, local_date, local_time, latitude, longitude, alt_gps, ias, e1_rpm) " +
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 
     private static final int FLUSH_EVERY = 5000;
@@ -59,7 +59,7 @@ public class FlightRecordDao {
                 ps.setString(3, rec.time);
                 ps.setDouble(4, rec.lat);
                 ps.setDouble(5, rec.lon);
-                ps.setDouble(6, rec.alt);
+                ps.setDouble(6, rec.altGps);
                 ps.setDouble(7, rec.ias);
                 ps.setDouble(8, rec.rpm);
                 ps.addBatch();
@@ -113,7 +113,7 @@ public class FlightRecordDao {
     public static int loadByDate(Connection conn, String date,
                                  Map<String, List<AircraftSnapshot>> byTime) throws Exception {
         String sql =
-            "SELECT tail, local_time, latitude, longitude, alt_msl, ias " +
+            "SELECT tail, local_time, latitude, longitude, alt_gps, ias " +
             "FROM flight_records " +
             "WHERE local_date = ? " +
             "ORDER BY local_time, tail, id";
@@ -138,7 +138,7 @@ public class FlightRecordDao {
                     snap.tail = tail;
                     snap.lat  = rs.getDouble("latitude");
                     snap.lon  = rs.getDouble("longitude");
-                    snap.alt  = rs.getDouble("alt_msl");
+                    snap.alt  = rs.getDouble("alt_gps");
                     snap.ias  = rs.getDouble("ias");
                     list.add(snap);
                 }

@@ -7,9 +7,11 @@ import com.skidreport.db.NearMissEventDao;
 import com.skidreport.excel.NearMissExcelWriter;
 import com.skidreport.model.AircraftSnapshot;
 import com.skidreport.model.NearMissEvent;
+import com.skidreport.model.NearMissFlightRecord;
 import com.skidreport.util.CsvParser;
 import com.skidreport.util.DateUtils;
 import com.skidreport.util.GeoUtils;
+import com.skidreport.util.TailNumbers;
 
 import java.io.File;
 import java.sql.Connection;
@@ -31,10 +33,16 @@ import java.util.Map;
  * PHASE 2 -- Load all aircraft CSV data into SQLite (filtered by triggers)
  * PHASE 3 -- Detect near-miss events per date, store results, write Excel
  *
- * TRIGGERS (all must be true for both aircraft):
- *   IAS > 45 kts   AND   AltMSL > 500 ft   AND   E1 RPM > 0
+ * All timestamps are corrected to true Central (America/Chicago) local time
+ * before any comparison (see CsvParser + DateUtils), so two aircraft logged
+ * with different UTCOfst values still line up at the same corrected second.
  *
- * NEAR-MISS: 3D Haversine distance < 500 feet
+ * TRIGGERS (all must be true for both aircraft, applied per row before insert):
+ *   IAS > 45 kts   AND   AltMSL > 1000 ft   AND   E1 RPM > 0
+ *
+ * NEAR-MISS: straight-line 3D distance < 500 ft -- Haversine horizontal
+ *            distance combined with the AltGPS vertical difference. Direction
+ *            (horizontal, vertical, or diagonal) does not matter.
  */
 public class NearMissReportGenerator {
 
@@ -45,10 +53,13 @@ public class NearMissReportGenerator {
 
     static final double NEAR_MISS_FEET = 500.0;
 
-    // Trigger filters applied before inserting into DB
-    static final double MIN_IAS = 45.0;
-    static final double MIN_ALT = 500.0;
-    static final double MIN_RPM = 0.0;
+    // Eligibility filters (R2) applied per row, per aircraft, BEFORE insert.
+    // A near-miss can only form when both aircraft independently passed all
+    // three. AltMSL (barometric MSL) is the altitude floor; AltGPS is reserved
+    // for the separation distance (R3).
+    static final double MIN_IAS     = 45.0;     // IAS must be > 45 kt
+    static final double MIN_RPM     = 0.0;      // E1 RPM must be > 0
+    static final double MIN_ALT_MSL = 1000.0;   // AltMSL must be > 1000 ft
 
     public static void main(String[] args) throws Exception {
 
@@ -110,8 +121,15 @@ public class NearMissReportGenerator {
             Arrays.sort(tailDirs, Comparator.comparing(File::getName));
 
             for (File tailDir : tailDirs) {
-                String tail = tailDir.getName().trim();
-                System.out.println("\n  Loading: " + tail);
+                // R4: resolve the folder to a canonical tail so identities are
+                // consistent with the skid + bank/pitch reports. Folders that
+                // are not a known fleet aircraft are skipped.
+                String tail = TailNumbers.detect(tailDir.getName());
+                if (tail == null) {
+                    System.out.println("\n  Skipping non-aircraft folder: " + tailDir.getName());
+                    continue;
+                }
+                System.out.println("\n  Loading: " + tail + "  (" + tailDir.getName() + ")");
                 int rows = loadAircraft(conn, tail, tailDir);
                 System.out.println("  Inserted " + rows + " qualifying records for " + tail);
             }
@@ -136,6 +154,18 @@ public class NearMissReportGenerator {
             NearMissCsvWriter.writeAll(conn);
             System.out.println("[PHASE 3] CSV complete.");
         }
+    }
+
+    // ------------------------------------------------------------------------
+    // ELIGIBILITY (R2): a row qualifies only if all three triggers hold.
+    // Because this is applied before insert, a near-miss can only form when
+    // both aircraft independently passed all three -- in particular AltMSL >
+    // 1000 keeps anything on or near the runway/ground out of every event.
+    // ------------------------------------------------------------------------
+    static boolean qualifies(NearMissFlightRecord rec) {
+        return rec.ias > MIN_IAS
+                && rec.rpm > MIN_RPM
+                && rec.altMsl > MIN_ALT_MSL;
     }
 
     // ------------------------------------------------------------------------
@@ -164,10 +194,7 @@ public class NearMissReportGenerator {
             for (File csv : csvFiles) {
                 try {
                     CsvParser.streamNearMissCsvFile(csv, tail, rec -> {
-                        if (rec.ias <= MIN_IAS) return;
-                        if (rec.alt <= MIN_ALT) return;
-                        if (rec.rpm <= MIN_RPM) return;
-                        inserter.add(rec);
+                        if (qualifies(rec)) inserter.add(rec);
                     });
                 } catch (Exception e) {
                     skipped++;

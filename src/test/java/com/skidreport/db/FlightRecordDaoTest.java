@@ -14,23 +14,22 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Runtime exercise of the flight_records schema against real SQLite: proves the
- * alt_msl -> alt_gps rename round-trips end to end (Inserter stores AltGPS,
- * loadByDate reads it back into the snapshot used for distance), and that the
- * (tail, corrected-second) dedup for overlapping logs works (R5).
+ * Runtime exercise of the flight_records schema against real SQLite: proves
+ * AltMSL round-trips end to end (Inserter stores alt_msl, loadByDate reads it
+ * back into the snapshot used for distance), and that the (tail,
+ * corrected-second) dedup for overlapping logs works (R5).
  */
 public class FlightRecordDaoTest {
 
     private static NearMissFlightRecord rec(String tail, String date, String time,
-                                            double altGps, double ias) {
+                                            double altMsl, double ias) {
         NearMissFlightRecord r = new NearMissFlightRecord();
         r.tail = tail;
         r.date = date;
         r.time = time;
         r.lat = 37.78;
         r.lon = -89.25;
-        r.altMsl = altGps + 50.0;   // not stored; floor filter already applied upstream
-        r.altGps = altGps;          // this is what must round-trip into the snapshot
+        r.altMsl = altMsl;          // this is what must round-trip into the snapshot
         r.ias = ias;
         r.rpm = 2000.0;
         return r;
@@ -63,7 +62,7 @@ public class FlightRecordDaoTest {
             AircraftSnapshot p82 = at7.stream()
                     .filter(s -> s.tail.equals("82P")).findFirst().orElse(null);
             assertTrue(p82 != null);
-            // First 82P row kept by id order -> AltGPS 1450 (the rename round-trips)
+            // First 82P row kept by id order -> AltMSL 1450 round-trips into the snapshot
             assertEquals(1450.0, p82.alt, 1e-9);
 
             assertEquals("second 07:00:01 has only 82P", 1, byTime.get("07:00:01").size());

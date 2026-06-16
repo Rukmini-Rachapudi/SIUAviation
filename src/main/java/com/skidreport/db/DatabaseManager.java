@@ -28,9 +28,9 @@ public class DatabaseManager {
             // One row per second per aircraft (after trigger filters applied)
             // ----------------------------------------------------------------
             // local_date / local_time are the CORRECTED Central-time values.
-            // alt_gps is the WGS-84 GPS altitude used for 3D separation distance
-            // (R3); the AltMSL floor filter (R2) is applied before insert, so
-            // AltMSL itself is not stored.
+            // alt_msl is the barometric MSL altitude: it is both the eligibility
+            // floor (R2, applied before insert) and the vertical component of the
+            // 3D separation distance (R3).
             st.execute(
                 "CREATE TABLE flight_records ("                           +
                 "  id         INTEGER PRIMARY KEY AUTOINCREMENT,"         +
@@ -39,7 +39,7 @@ public class DatabaseManager {
                 "  local_time TEXT    NOT NULL,"                          +
                 "  latitude   REAL    NOT NULL,"                          +
                 "  longitude  REAL    NOT NULL,"                          +
-                "  alt_gps    REAL    NOT NULL,"                          +
+                "  alt_msl    REAL    NOT NULL,"                          +
                 "  ias        REAL    NOT NULL,"                          +
                 "  e1_rpm     REAL    NOT NULL"                           +
                 ")"

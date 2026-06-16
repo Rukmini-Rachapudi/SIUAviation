@@ -55,12 +55,11 @@ public class CsvParser {
     private static final String H_LON     = "Longitude";
     private static final String H_RPM     = "E1 RPM";
     private static final String H_UTCOFST = "UTCOfst";  // row's claimed offset, ±hh:mm
-    private static final String H_ALT_GPS = "AltGPS";   // WGS-84 GPS altitude, used for 3D distance
 
-    // AltMSL is the altitude floor (R2); AltGPS is the separation altitude (R3);
+    // AltMSL is both the altitude floor (R2) and the separation altitude (R3);
     // UTCOfst is required so every timestamp can be corrected to Central time (R1).
     private static final String[] NEAR_MISS_REQUIRED_COLS = {
-            H_DATE, H_TIME, H_UTCOFST, H_LAT, H_LON, H_ALT, H_ALT_GPS, H_IAS, H_RPM
+            H_DATE, H_TIME, H_UTCOFST, H_LAT, H_LON, H_ALT, H_IAS, H_RPM
     };
 
     // ========================================================================
@@ -193,13 +192,12 @@ public class CsvParser {
 
                     rec.lat    = parseDouble(getCol(cols, colIndex, H_LAT));
                     rec.lon    = parseDouble(getCol(cols, colIndex, H_LON));
-                    rec.altMsl = parseDouble(getCol(cols, colIndex, H_ALT));      // floor filter (R2)
-                    rec.altGps = parseDouble(getCol(cols, colIndex, H_ALT_GPS));  // 3D distance (R3)
+                    rec.altMsl = parseDouble(getCol(cols, colIndex, H_ALT));      // floor (R2) + distance (R3)
                     rec.ias    = parseDouble(getCol(cols, colIndex, H_IAS));
                     rec.rpm    = parseDouble(getCol(cols, colIndex, H_RPM));
 
                     if (Double.isNaN(rec.lat) || Double.isNaN(rec.lon)
-                            || Double.isNaN(rec.altMsl) || Double.isNaN(rec.altGps)
+                            || Double.isNaN(rec.altMsl)
                             || Double.isNaN(rec.ias) || Double.isNaN(rec.rpm)) return;
 
                     sink.accept(rec);

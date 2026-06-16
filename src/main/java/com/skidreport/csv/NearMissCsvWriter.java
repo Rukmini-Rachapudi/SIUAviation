@@ -1,7 +1,6 @@
 package com.skidreport.csv;
 
 import com.skidreport.db.NearMissEventDao;
-import com.skidreport.model.NearMissEvent;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -61,9 +60,10 @@ public final class NearMissCsvWriter {
                                  String tail1, String tail2, String yearMonth,
                                  BufferedWriter pbi) throws Exception {
 
-        List<NearMissEvent> events =
-                NearMissEventDao.getEventsForPairAndMonth(conn, tail1, tail2, yearMonth);
-        if (events.isEmpty()) return;
+        // Count first so the "total this month" cell can go on row 1 without
+        // holding the whole result set in memory; then stream the rows.
+        int total = NearMissEventDao.countEventsForPairAndMonth(conn, tail1, tail2, yearMonth);
+        if (total == 0) return;
 
         String[] parts   = yearMonth.split("-");
         String year      = parts[0];
@@ -77,33 +77,37 @@ public final class NearMissCsvWriter {
         String filename = String.format("NearMiss_%s_%s_%s_%s_%s.csv",
                 tail1, tail2, year, monthNum, monthName);
         File outFile = new File(monthDir, filename);
+        String pairKey = tail1 + "_vs_" + tail2;
 
         try (BufferedWriter w = CsvWriterUtil.open(outFile)) {
             CsvWriterUtil.writeHeader(w, MIRROR_HEADERS);
 
-            int rowNum = 1;
-            String pairKey = tail1 + "_vs_" + tail2;
-            for (NearMissEvent ev : events) {
-                Object totalThisMonth = (rowNum == 1) ? Integer.valueOf(events.size()) : "";
+            // Mutable counter usable from the streaming lambda.
+            final int[] rowNum = {1};
+            NearMissEventDao.streamEventsForPairAndMonth(conn, tail1, tail2, yearMonth, ev -> {
+                try {
+                    Object totalThisMonth = (rowNum[0] == 1) ? Integer.valueOf(total) : "";
 
-                CsvWriterUtil.writeRow(w, new Object[]{
-                        ev.date, ev.startTime, ev.durationSeconds,
-                        tail1, ev.lat1, ev.lon1, ev.alt1, ev.ias1,
-                        tail2, ev.lat2, ev.lon2, ev.alt2, ev.ias2,
-                        ev.minDistanceFt, totalThisMonth
-                });
+                    CsvWriterUtil.writeRow(w, new Object[]{
+                            ev.date, ev.startTime, ev.durationSeconds,
+                            tail1, ev.lat1, ev.lon1, ev.alt1, ev.ias1,
+                            tail2, ev.lat2, ev.lon2, ev.alt2, ev.ias2,
+                            ev.minDistanceFt, totalThisMonth
+                    });
 
-                CsvWriterUtil.writeRow(pbi, new Object[]{
-                        yearMonth, ev.date, ev.startTime, ev.durationSeconds,
-                        tail1, ev.lat1, ev.lon1, ev.alt1, ev.ias1,
-                        tail2, ev.lat2, ev.lon2, ev.alt2, ev.ias2,
-                        ev.minDistanceFt, pairKey
-                });
-                rowNum++;
-            }
+                    CsvWriterUtil.writeRow(pbi, new Object[]{
+                            yearMonth, ev.date, ev.startTime, ev.durationSeconds,
+                            tail1, ev.lat1, ev.lon1, ev.alt1, ev.ias1,
+                            tail2, ev.lat2, ev.lon2, ev.alt2, ev.ias2,
+                            ev.minDistanceFt, pairKey
+                    });
+                    rowNum[0]++;
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed writing row for " + outFile.getName(), e);
+                }
+            });
 
-            System.out.printf("    CSV: %s  [%d event(s)]%n",
-                    outFile.getName(), events.size());
+            System.out.printf("    CSV: %s  [%d event(s)]%n", outFile.getName(), total);
 
         } catch (IOException e) {
             System.err.println("  [ERROR] Failed to write " + outFile.getName()

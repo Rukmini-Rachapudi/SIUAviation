@@ -72,8 +72,7 @@ public class CsvParserTest {
         assertEquals("07:00:00", r.time);     // +00:00 in CDT -> -5h
         assertEquals(37.78, r.lat, 1e-9);
         assertEquals(-89.25, r.lon, 1e-9);
-        assertEquals(1500.0, r.altMsl, 1e-9); // AltMSL -> floor filter
-        assertEquals(1450.0, r.altGps, 1e-9); // AltGPS -> separation distance
+        assertEquals(1500.0, r.altMsl, 1e-9); // AltMSL -> floor filter + separation distance
         assertEquals(60.0, r.ias, 1e-9);
         assertEquals(2000.0, r.rpm, 1e-9);
     }

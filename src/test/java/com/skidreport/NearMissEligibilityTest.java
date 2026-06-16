@@ -18,7 +18,6 @@ public class NearMissEligibilityTest {
         r.ias = ias;
         r.rpm = rpm;
         r.altMsl = altMsl;
-        r.altGps = altMsl;   // value irrelevant to eligibility
         r.lat = 37.78;
         r.lon = -89.25;
         return r;

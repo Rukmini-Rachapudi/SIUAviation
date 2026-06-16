@@ -21,10 +21,11 @@ public class FlightRecordDao {
 
     private static final String INSERT_SQL =
         "INSERT INTO flight_records " +
-        "  (tail, local_date, local_time, latitude, longitude, alt_gps, ias, e1_rpm) " +
+        "  (tail, local_date, local_time, latitude, longitude, alt_msl, ias, e1_rpm) " +
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 
-    private static final int FLUSH_EVERY = 5000;
+    private static final int FLUSH_EVERY  = 5_000;     // rows per JDBC batch
+    private static final int COMMIT_EVERY = 200_000;   // rows per commit -- bounds the WAL during load
 
     // ------------------------------------------------------------------------
     // STREAMING INSERT
@@ -44,11 +45,13 @@ public class FlightRecordDao {
 
     public static class Inserter implements AutoCloseable {
 
+        private final Connection conn;
         private final PreparedStatement ps;
         private int pending = 0;
         private int total   = 0;
 
         private Inserter(Connection conn) throws SQLException {
+            this.conn = conn;
             this.ps = conn.prepareStatement(INSERT_SQL);
         }
 
@@ -59,7 +62,7 @@ public class FlightRecordDao {
                 ps.setString(3, rec.time);
                 ps.setDouble(4, rec.lat);
                 ps.setDouble(5, rec.lon);
-                ps.setDouble(6, rec.altGps);
+                ps.setDouble(6, rec.altMsl);
                 ps.setDouble(7, rec.ias);
                 ps.setDouble(8, rec.rpm);
                 ps.addBatch();
@@ -68,6 +71,12 @@ public class FlightRecordDao {
                 if (pending >= FLUSH_EVERY) {
                     ps.executeBatch();
                     pending = 0;
+                }
+                // Commit periodically so a single large aircraft cannot grow the
+                // WAL without bound (and so a crash mid-load keeps prior rows).
+                // No-op when the connection is in autocommit mode.
+                if (total % COMMIT_EVERY == 0 && !conn.getAutoCommit()) {
+                    conn.commit();
                 }
             } catch (SQLException e) {
                 throw new RuntimeException("Insert into flight_records failed", e);
@@ -113,7 +122,7 @@ public class FlightRecordDao {
     public static int loadByDate(Connection conn, String date,
                                  Map<String, List<AircraftSnapshot>> byTime) throws Exception {
         String sql =
-            "SELECT tail, local_time, latitude, longitude, alt_gps, ias " +
+            "SELECT tail, local_time, latitude, longitude, alt_msl, ias " +
             "FROM flight_records " +
             "WHERE local_date = ? " +
             "ORDER BY local_time, tail, id";
@@ -138,7 +147,7 @@ public class FlightRecordDao {
                     snap.tail = tail;
                     snap.lat  = rs.getDouble("latitude");
                     snap.lon  = rs.getDouble("longitude");
-                    snap.alt  = rs.getDouble("alt_gps");
+                    snap.alt  = rs.getDouble("alt_msl");
                     snap.ias  = rs.getDouble("ias");
                     list.add(snap);
                 }

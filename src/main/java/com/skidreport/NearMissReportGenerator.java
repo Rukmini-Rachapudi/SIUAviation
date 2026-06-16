@@ -11,11 +11,13 @@ import com.skidreport.model.NearMissFlightRecord;
 import com.skidreport.util.CsvParser;
 import com.skidreport.util.DateUtils;
 import com.skidreport.util.GeoUtils;
+import com.skidreport.util.RunLogger;
 import com.skidreport.util.TailNumbers;
 
 import java.io.File;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -43,7 +45,7 @@ import java.util.Map;
  *    excluded while every airborne event -- including pattern traffic -- is kept.)
  *
  * NEAR-MISS: straight-line 3D distance < 500 ft -- Haversine horizontal
- *            distance combined with the AltGPS vertical difference. Direction
+ *            distance combined with the AltMSL vertical difference. Direction
  *            (horizontal, vertical, or diagonal) does not matter.
  */
 public class NearMissReportGenerator {
@@ -64,8 +66,8 @@ public class NearMissReportGenerator {
 
     // Eligibility filters (R2) applied per row, per aircraft, BEFORE insert.
     // A near-miss can only form when both aircraft independently passed all
-    // three. AltMSL (barometric MSL) is the altitude floor; AltGPS is reserved
-    // for the separation distance (R3).
+    // three. AltMSL (barometric MSL) is both the altitude floor and the
+    // vertical component of the separation distance (R3).
     static final double MIN_IAS     = 45.0;     // IAS must be > 45 kt
     static final double MIN_RPM     = 0.0;      // E1 RPM must be > 0
     static final double MIN_ALT_MSL = 600.0;    // AltMSL must be > 600 ft (clears ~411 ft fields)
@@ -76,7 +78,10 @@ public class NearMissReportGenerator {
 
         File rootDir = new File(INPUT_PATH);
 
-        // .db stays at a stable root path so subsequent runs can reuse it as a cache.
+        // The .db is rebuilt from scratch every run -- older data is never reused,
+        // so the previous file (and its WAL/SHM sidecars) is deleted at startup.
+        // This keeps the file small; without it, dropping a multi-GB leftover table
+        // in PHASE 1 can grind for minutes and looks like a hang.
         File dbDir = new File(OUTPUT_PATH + File.separator + "NearMiss");
         // Report files land inside the per-run day folder, matching skid + bank/pitch.
         File outputDir = new File(OUTPUT_PATH + File.separator + dayFolder
@@ -90,10 +95,22 @@ public class NearMissReportGenerator {
         dbDir.mkdirs();
         outputDir.mkdirs();
 
+        // Mirror everything printed below to a timestamped log file so each run
+        // leaves a record on disk for post-mortem analysis.
+        RunLogger.init(new File(dbDir, "logs"));
+        RunLogger.log("=== Near-miss run starting ===");
+
         String dbPath = dbDir.getAbsolutePath() + File.separator + "near_miss.db";
         System.out.println("Input    : " + INPUT_PATH);
         System.out.println("Output   : " + outputDir.getAbsolutePath());
         System.out.println("Database : " + dbPath);
+
+        // Start each run from a clean, empty database. Deleting the file (plus the
+        // WAL/SHM sidecars left by journal_mode=WAL) avoids the slow DROP TABLE on
+        // a large leftover .db and reclaims the disk space.
+        deleteIfExists(dbPath);
+        deleteIfExists(dbPath + "-wal");
+        deleteIfExists(dbPath + "-shm");
 
         Class.forName("org.sqlite.JDBC");
 
@@ -103,7 +120,9 @@ public class NearMissReportGenerator {
             try (Statement st = conn.createStatement()) {
                 st.execute("PRAGMA journal_mode=WAL");
                 st.execute("PRAGMA synchronous=NORMAL");
-                st.execute("PRAGMA cache_size=10000");
+                st.execute("PRAGMA cache_size=-65536");      // ~64 MB page cache (bounded)
+                st.execute("PRAGMA busy_timeout=5000");      // wait up to 5s for a lock, don't fail instantly
+                st.execute("PRAGMA wal_autocheckpoint=2000"); // keep the WAL small during the load
             }
 
             conn.setAutoCommit(false);
@@ -141,10 +160,16 @@ public class NearMissReportGenerator {
                 System.out.println("\n  Loading: " + tail + "  (" + tailDir.getName() + ")");
                 int rows = loadAircraft(conn, tail, tailDir);
                 System.out.println("  Inserted " + rows + " qualifying records for " + tail);
+
+                // Commit per aircraft and truncate the WAL so the load never
+                // holds one giant multi-GB transaction open across the fleet.
+                commitAndCheckpoint(conn);
+                RunLogger.mem("after " + tail);
             }
 
             conn.commit();
             System.out.println("\n[PHASE 2] Complete.");
+            RunLogger.mem("phase2-complete");
             FlightRecordDao.printSummary(conn);
 
             // ------------------------------------------------------------------
@@ -154,6 +179,7 @@ public class NearMissReportGenerator {
             int eventCount = detectNearMisses(conn);
             conn.commit();
             System.out.println("[PHASE 3] Detection complete: " + eventCount + " event(s) stored.");
+            RunLogger.mem("detection-complete");
 
             System.out.println("\n[PHASE 3] Writing Excel reports...");
             NearMissExcelWriter.writeAll(conn, outputDir);
@@ -162,6 +188,31 @@ public class NearMissReportGenerator {
             System.out.println("\n[PHASE 3] Writing CSV reports (mirror + Power BI)...");
             NearMissCsvWriter.writeAll(conn);
             System.out.println("[PHASE 3] CSV complete.");
+
+            RunLogger.mem("done");
+            RunLogger.log("=== Near-miss run complete ===");
+        } catch (Exception e) {
+            // Log the full stack trace to the run file before failing, so the
+            // cause survives even if the console scrolls away or the IDE closes.
+            RunLogger.error("Run failed", e);
+            throw e;
+        } finally {
+            RunLogger.flush();
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Commit the current transaction and truncate the WAL back to a small file.
+    // Briefly switches to autocommit so the checkpoint runs outside a
+    // transaction (TRUNCATE is a no-op while a write transaction is open).
+    // ------------------------------------------------------------------------
+    private static void commitAndCheckpoint(Connection conn) throws SQLException {
+        conn.commit();
+        conn.setAutoCommit(true);
+        try (Statement st = conn.createStatement()) {
+            st.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+        } finally {
+            conn.setAutoCommit(false);
         }
     }
 
@@ -185,6 +236,20 @@ public class NearMissReportGenerator {
     // ------------------------------------------------------------------------
     static boolean isNearMissSeparation(double distFt) {
         return distFt >= MIN_SEPARATION_FEET && distFt < NEAR_MISS_FEET;
+    }
+
+    // ------------------------------------------------------------------------
+    // Delete a file if it exists, failing loudly if it cannot be removed (e.g.
+    // the database is still open in another process). Used to wipe the previous
+    // run's database before starting a fresh one.
+    // ------------------------------------------------------------------------
+    private static void deleteIfExists(String path) {
+        File f = new File(path);
+        if (f.exists() && !f.delete()) {
+            System.err.println("ERROR: Could not delete " + path
+                    + " -- is it open in another program?");
+            System.exit(1);
+        }
     }
 
     // ------------------------------------------------------------------------

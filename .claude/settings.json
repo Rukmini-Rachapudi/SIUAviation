@@ -11,7 +11,14 @@
       "Bash(mvn -DskipTests clean compile)",
       "PowerShell(git commit -F .git/COMMIT_MSG_TMP.txt)",
       "PowerShell(mvn -DskipTests compile 2>&1)",
-      "PowerShell(mvn -DskipTests clean compile 2>&1)"
+      "PowerShell(mvn -DskipTests clean compile 2>&1)",
+      "PowerShell(git fetch --all --prune)",
+      "PowerShell(git pull --ff-only origin bank-pitch-events)",
+      "PowerShell(mvn clean install)",
+      "Read(//c/Users/SIU950304093/Documents/Skids Monthly Reports/Output/NearMiss/**)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='java.exe' OR Name='javaw.exe'\")",
+      "PowerShell($p = Get-CimInstance Win32_Process -Filter \"ProcessId=18664\"; $p.CommandLine)",
+      "PowerShell(1..3 | ForEach-Object { $p = Get-Process -Id 18664 -ErrorAction SilentlyContinue; if \\($p\\) { \"{0}  CPU\\(s\\)={1:N1}  WS\\(MB\\)={2:N0}\" -f \\(Get-Date -Format HH:mm:ss\\), $p.CPU, \\($p.WorkingSet64/1MB\\) }; Start-Sleep -Milliseconds 1500 })"
     ],
     "additionalDirectories": [
       "C:\\Users\\SIU950304093\\Desktop\\SkidsReports\\.git"

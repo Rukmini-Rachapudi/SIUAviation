@@ -72,6 +72,13 @@ public class NearMissReportGenerator {
     static final double MIN_RPM     = 0.0;      // E1 RPM must be > 0
     static final double MIN_ALT_MSL = 600.0;    // AltMSL must be > 600 ft (clears ~411 ft fields)
 
+    // Encounter grouping (R4): consecutive qualifying seconds for the same pair
+    // belong to one event as long as the gap between them is no more than this
+    // many seconds. A gap of 1 is perfectly adjacent; a larger gap (up to and
+    // including the threshold) bridges brief data dropouts within one encounter.
+    // Anything beyond it -- or a date boundary -- closes the event.
+    static final int MAX_GROUPING_GAP_SECONDS = 6;
+
     public static void main(String[] args) throws Exception {
 
         String dayFolder = DateUtils.todayDayFolder();
@@ -295,11 +302,14 @@ public class NearMissReportGenerator {
     // ------------------------------------------------------------------------
     // PHASE 3 HELPER: Detect near-miss events across all aircraft for every date
     //
-    // For each pair of aircraft, a single "event" spans one or more consecutive
-    // seconds (t, t+1, t+2, ...) where the pair is within NEAR_MISS_FEET. Any
-    // gap -- a non-consecutive second, a second where the pair is no longer
-    // within range, or a date boundary -- closes the event. The output row
-    // captures duration and the closest-approach snapshot inside that window.
+    // For each pair of aircraft, a single "event" spans a run of qualifying
+    // seconds where the pair is within NEAR_MISS_FEET. Consecutive qualifying
+    // seconds stay in the same event as long as the gap between them is at most
+    // MAX_GROUPING_GAP_SECONDS (so short data dropouts do not split one
+    // encounter). A larger gap, a second where the pair is no longer within
+    // range, or a date boundary closes the event. The output row captures
+    // duration (start-to-end span, inclusive) and the closest-approach snapshot
+    // inside that window.
     // ------------------------------------------------------------------------
     private static int detectNearMisses(Connection conn) throws Exception {
 
@@ -367,11 +377,15 @@ public class NearMissReportGenerator {
                         boolean canExtend = ae != null
                                 && currentSec >= 0
                                 && ae.lastSec >= 0
-                                && currentSec == ae.lastSec + 1;
+                                && currentSec > ae.lastSec
+                                && currentSec - ae.lastSec <= MAX_GROUPING_GAP_SECONDS;
 
                         if (canExtend) {
+                            // Duration is the span from start to this second
+                            // inclusive, so a bridged gap counts its missing
+                            // seconds too. Reduces to +1 when perfectly adjacent.
+                            ae.durationSecs += (currentSec - ae.lastSec);
                             ae.lastSec       = currentSec;
-                            ae.durationSecs++;
                             if (distFt < ae.minDist) {
                                 ae.minDist = distFt;
                                 ae.lat1 = s1.lat; ae.lon1 = s1.lon; ae.alt1 = s1.alt; ae.ias1 = s1.ias;

@@ -6,6 +6,8 @@ import com.skidreport.excel.AttitudeEventExcelWriter;
 import com.skidreport.model.AttitudeEvent;
 import com.skidreport.util.CsvParser;
 import com.skidreport.util.DateUtils;
+import com.skidreport.util.DuplicateRowFilter;
+import com.skidreport.util.FleetLogIndex;
 
 import java.io.File;
 import java.io.IOException;
@@ -37,10 +39,12 @@ import java.util.TreeMap;
  *     in-memory state is dropped before moving to the next aircraft.
  *   - Ctrl+C mid-run: every aircraft already finished still has full output.
  *
- * NO in-flight filter -- every CSV row is evaluated.
+ * NO in-flight filter -- every CSV row is evaluated once. A row whose second was
+ * already read from another file (the same log copied twice, or overlapping
+ * logs) is dropped by DuplicateRowFilter so its events are not counted twice.
  *
  * OUTPUT:
- *   Output/<dayFolder>/Bank Pitch Events/
+ *   Output/Bank Pitch Events/
  *     BankPitch_Reports_<tail>/
  *       BankPitch_<tail>_<YYYY>_<MM>_<Month>.xlsx
  */
@@ -51,18 +55,9 @@ public class AttitudeEventReportGenerator {
 
     private static final int BATCH_SIZE = 10;
 
-    private static final String[] ALL_TAIL_NUMBERS = {
-            "41E","3FS","4FS","5FS","46A","47E","48A","49A",
-            "13N","31T","41K","61J","83H","2JP",
-            "06H","97B","59Y","78K","49K","29E","82P"
-    };
-
     public static void main(String[] args) throws IOException {
-        String dayFolder = DateUtils.todayDayFolder();
-
         File rootDir   = new File(INPUT_PATH);
-        File outputDir = new File(OUTPUT_PATH + File.separator + dayFolder
-                + File.separator + "Bank Pitch Events");
+        File outputDir = new File(OUTPUT_PATH + File.separator + "Bank Pitch Events");
 
         if (!rootDir.exists() || !rootDir.isDirectory()) {
             System.err.println("ERROR: INPUT_PATH not found: " + INPUT_PATH);
@@ -77,11 +72,9 @@ public class AttitudeEventReportGenerator {
         System.out.println("Output     : " + outputDir.getAbsolutePath());
         System.out.println("Batch size : " + BATCH_SIZE);
 
-        File[] subdirs = rootDir.listFiles(File::isDirectory);
-        if (subdirs == null || subdirs.length == 0) {
-            System.out.println("No subdirectories found.");
-            return;
-        }
+        // Every log is assigned to the aircraft that recorded it (from its
+        // system_id), not to the folder it happens to sit in.
+        Map<String, List<File>> filesByTail = FleetLogIndex.filesByTail(rootDir);
 
         try {
             AttitudeEventCsvWriter.beginConsolidated();
@@ -92,13 +85,12 @@ public class AttitudeEventReportGenerator {
         int totalBank = 0, totalHigh = 0, totalLow = 0;
         boolean anyProcessed = false;
 
-        for (File dir : subdirs) {
-            String tail = detectTailNumber(dir.getName());
-            if (tail == null) continue;
+        for (Map.Entry<String, List<File>> entry : filesByTail.entrySet()) {
+            String tail = entry.getKey();
             anyProcessed = true;
 
             System.out.println("\n--- Processing " + tail + " ---");
-            int[] counts = processFlightFolder(tail, dir, outputDir);
+            int[] counts = processFlightFiles(tail, entry.getValue(), outputDir);
             totalBank += counts[0];
             totalHigh += counts[1];
             totalLow  += counts[2];
@@ -127,11 +119,10 @@ public class AttitudeEventReportGenerator {
     // ------------------------------------------------------------------------
     // PER-AIRCRAFT
     // Returns int[3]: total bank, high-pitch, low-pitch events written.
+    // csvFiles come from FleetLogIndex already sorted by name (= time order,
+    // with copies of the same log side by side for DuplicateRowFilter).
     // ------------------------------------------------------------------------
-    private static int[] processFlightFolder(String tail, File flightDir, File outputDir) {
-        List<File> csvFiles = new ArrayList<>();
-        CsvParser.collectCsvFiles(flightDir, csvFiles);
-        csvFiles.sort((a, b) -> a.getName().compareTo(b.getName()));
+    private static int[] processFlightFiles(String tail, List<File> csvFiles, File outputDir) {
         System.out.println("  CSV files found: " + csvFiles.size());
 
         if (csvFiles.isEmpty()) {
@@ -146,6 +137,7 @@ public class AttitudeEventReportGenerator {
                 tail, AttitudeEventDetector.HIGH_PITCH_TRIGGER, r -> r.pitch);
         AttitudeEventDetector low  = new AttitudeEventDetector(
                 tail, AttitudeEventDetector.LOW_PITCH_TRIGGER, r -> r.pitch);
+        DuplicateRowFilter dedup = new DuplicateRowFilter();
 
         int totalBatches = (int) Math.ceil((double) csvFiles.size() / BATCH_SIZE);
         int batchNumber  = 0;
@@ -160,7 +152,9 @@ public class AttitudeEventReportGenerator {
 
             for (File csv : batch) {
                 try {
+                    dedup.startFile(csv);
                     CsvParser.streamAttitudeCsvFile(csv, rec -> {
+                        if (!dedup.firstSighting(rec)) return;
                         bank.accept(rec);
                         high.accept(rec);
                         low.accept(rec);
@@ -178,6 +172,10 @@ public class AttitudeEventReportGenerator {
 
         System.out.printf("  All batches done -- bank=%d, highPitch=%d, lowPitch=%d%n",
                 bankEvents.size(), highEvents.size(), lowEvents.size());
+        if (dedup.skipped() > 0) {
+            System.out.printf("  Skipped %d duplicate row(s) -- same flight logged in more than one file.%n",
+                    dedup.skipped());
+        }
 
         // Group by YYYY-MM and write one workbook per month
         Map<String, List<AttitudeEvent>> bankByMonth = groupByMonth(bankEvents);
@@ -216,12 +214,5 @@ public class AttitudeEventReportGenerator {
             byMonth.computeIfAbsent(key, k -> new ArrayList<>()).add(ev);
         }
         return byMonth;
-    }
-
-    private static String detectTailNumber(String folderName) {
-        for (String tail : ALL_TAIL_NUMBERS) {
-            if (folderName.contains(tail)) return tail;
-        }
-        return null;
     }
 }

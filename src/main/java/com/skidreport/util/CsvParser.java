@@ -65,7 +65,8 @@ public class CsvParser {
     // ========================================================================
     // FILE COLLECTION
     // Recursively walks a directory tree collecting qualifying CSV files.
-    // Skips: files containing "master" or "skid" in name, and "000" files.
+    // Skips: files containing "master" or "skid" in name, "000" files, and
+    // macOS "._" metadata files (copied alongside real logs, not flight data).
     // ========================================================================
     public static void collectCsvFiles(File dir, List<File> result) {
         File[] entries = dir.listFiles();
@@ -76,6 +77,7 @@ public class CsvParser {
             } else {
                 String name = f.getName().toLowerCase();
                 if (name.endsWith(".csv")
+                        && !name.startsWith("._")
                         && !name.contains("master")
                         && !name.contains("skid")) {
                     if (f.getName().length() > 7 && f.getName().substring(4, 7).equals("000")) {

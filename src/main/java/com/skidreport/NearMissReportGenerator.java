@@ -10,9 +10,9 @@ import com.skidreport.model.NearMissEvent;
 import com.skidreport.model.NearMissFlightRecord;
 import com.skidreport.util.CsvParser;
 import com.skidreport.util.DateUtils;
+import com.skidreport.util.FleetLogIndex;
 import com.skidreport.util.GeoUtils;
 import com.skidreport.util.RunLogger;
-import com.skidreport.util.TailNumbers;
 
 import java.io.File;
 import java.sql.Connection;
@@ -20,8 +20,6 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,22 +38,22 @@ import java.util.Map;
  * with different UTCOfst values still line up at the same corrected second.
  *
  * TRIGGERS (all must be true for both aircraft, applied per row before insert):
- *   IAS > 45 kts   AND   AltMSL > 600 ft   AND   E1 RPM > 0
- *   (600 ft MSL clears the ~411 ft fields, so ground/taxi/rollout rows are
- *    excluded while every airborne event -- including pattern traffic -- is kept.)
+ * IAS > 45 kts AND AltMSL > 600 ft AND E1 RPM > 0
+ * (600 ft MSL clears the ~411 ft fields, so ground/taxi/rollout rows are
+ * excluded while every airborne event -- including pattern traffic -- is kept.)
  *
  * NEAR-MISS: straight-line 3D distance < 500 ft -- Haversine horizontal
- *            distance combined with the AltMSL vertical difference. Direction
- *            (horizontal, vertical, or diagonal) does not matter.
+ * distance combined with the AltMSL vertical difference. Direction
+ * (horizontal, vertical, or diagonal) does not matter.
  */
 public class NearMissReportGenerator {
 
     // -- EDIT THESE TWO PATHS ------------------------------------------------
-    static final String INPUT_PATH  = "C:\\Users\\SIU950304093\\Documents\\Skids Monthly Reports\\Input";
+    static final String INPUT_PATH = "C:\\Users\\SIU950304093\\Documents\\Skids Monthly Reports\\Input";
     static final String OUTPUT_PATH = "C:\\Users\\SIU950304093\\Documents\\Skids Monthly Reports\\Output";
     // ------------------------------------------------------------------------
 
-    static final double NEAR_MISS_FEET = 500.0;
+    static final double NEAR_MISS_FEET = 800.0;
 
     // Floor below which a "pair" cannot be two real aircraft: identical
     // coordinates under two different tails give 0 ft, which is physically a
@@ -68,9 +66,9 @@ public class NearMissReportGenerator {
     // A near-miss can only form when both aircraft independently passed all
     // three. AltMSL (barometric MSL) is both the altitude floor and the
     // vertical component of the separation distance (R3).
-    static final double MIN_IAS     = 45.0;     // IAS must be > 45 kt
-    static final double MIN_RPM     = 0.0;      // E1 RPM must be > 0
-    static final double MIN_ALT_MSL = 600.0;    // AltMSL must be > 600 ft (clears ~411 ft fields)
+    static final double MIN_IAS = 45.0; // IAS must be > 45 kt
+    static final double MIN_RPM = 0.0; // E1 RPM must be > 0
+    static final double MIN_ALT_MSL = 600.0; // AltMSL must be > 600 ft (clears ~411 ft fields)
 
     // Encounter grouping (R4): consecutive qualifying seconds for the same pair
     // belong to one event as long as the gap between them is no more than this
@@ -81,8 +79,6 @@ public class NearMissReportGenerator {
 
     public static void main(String[] args) throws Exception {
 
-        String dayFolder = DateUtils.todayDayFolder();
-
         File rootDir = new File(INPUT_PATH);
 
         // The .db is rebuilt from scratch every run -- older data is never reused,
@@ -90,9 +86,8 @@ public class NearMissReportGenerator {
         // This keeps the file small; without it, dropping a multi-GB leftover table
         // in PHASE 1 can grind for minutes and looks like a hang.
         File dbDir = new File(OUTPUT_PATH + File.separator + "NearMiss");
-        // Report files land inside the per-run day folder, matching skid + bank/pitch.
-        File outputDir = new File(OUTPUT_PATH + File.separator + dayFolder
-                + File.separator + "Near Miss");
+        // Report files land directly under Output, matching skid + bank/pitch.
+        File outputDir = new File(OUTPUT_PATH + File.separator + "Near Miss");
 
         if (!rootDir.exists() || !rootDir.isDirectory()) {
             System.err.println("ERROR: INPUT_PATH not found: " + INPUT_PATH);
@@ -127,8 +122,8 @@ public class NearMissReportGenerator {
             try (Statement st = conn.createStatement()) {
                 st.execute("PRAGMA journal_mode=WAL");
                 st.execute("PRAGMA synchronous=NORMAL");
-                st.execute("PRAGMA cache_size=-65536");      // ~64 MB page cache (bounded)
-                st.execute("PRAGMA busy_timeout=5000");      // wait up to 5s for a lock, don't fail instantly
+                st.execute("PRAGMA cache_size=-65536"); // ~64 MB page cache (bounded)
+                st.execute("PRAGMA busy_timeout=5000"); // wait up to 5s for a lock, don't fail instantly
                 st.execute("PRAGMA wal_autocheckpoint=2000"); // keep the WAL small during the load
             }
 
@@ -147,25 +142,19 @@ public class NearMissReportGenerator {
             // ------------------------------------------------------------------
             System.out.println("\n[PHASE 2] Loading all aircraft data...");
 
-            File[] tailDirs = rootDir.listFiles(File::isDirectory);
-            if (tailDirs == null || tailDirs.length == 0) {
+            // R4: every log is assigned to the aircraft that recorded it (from
+            // its avionics system_id), not the folder it sits in -- a misfiled
+            // log would otherwise put one aircraft in two places at once.
+            Map<String, List<File>> filesByTail = FleetLogIndex.filesByTail(rootDir);
+            if (filesByTail.isEmpty()) {
                 System.out.println("No aircraft folders found.");
                 return;
             }
 
-            Arrays.sort(tailDirs, Comparator.comparing(File::getName));
-
-            for (File tailDir : tailDirs) {
-                // R4: resolve the folder to a canonical tail so identities are
-                // consistent with the skid + bank/pitch reports. Folders that
-                // are not a known fleet aircraft are skipped.
-                String tail = TailNumbers.detect(tailDir.getName());
-                if (tail == null) {
-                    System.out.println("\n  Skipping non-aircraft folder: " + tailDir.getName());
-                    continue;
-                }
-                System.out.println("\n  Loading: " + tail + "  (" + tailDir.getName() + ")");
-                int rows = loadAircraft(conn, tail, tailDir);
+            for (Map.Entry<String, List<File>> entry : filesByTail.entrySet()) {
+                String tail = entry.getKey();
+                System.out.println("\n  Loading: " + tail);
+                int rows = loadAircraft(conn, tail, entry.getValue());
                 System.out.println("  Inserted " + rows + " qualifying records for " + tail);
 
                 // Commit per aircraft and truncate the WAL so the load never
@@ -266,11 +255,8 @@ public class NearMissReportGenerator {
     // -> trigger filter -> JDBC batch. No List<NearMissFlightRecord> is ever
     // held, so memory stays flat regardless of how large any one file is.
     // ------------------------------------------------------------------------
-    private static int loadAircraft(Connection conn, String tail, File tailDir)
+    private static int loadAircraft(Connection conn, String tail, List<File> csvFiles)
             throws Exception {
-
-        List<File> csvFiles = new ArrayList<>();
-        CsvParser.collectCsvFiles(tailDir, csvFiles);
 
         if (csvFiles.isEmpty()) {
             System.out.println("    No CSV files found.");
@@ -285,7 +271,8 @@ public class NearMissReportGenerator {
             for (File csv : csvFiles) {
                 try {
                     CsvParser.streamNearMissCsvFile(csv, tail, rec -> {
-                        if (qualifies(rec)) inserter.add(rec);
+                        if (qualifies(rec))
+                            inserter.add(rec);
                     });
                 } catch (Exception e) {
                     skipped++;
@@ -294,7 +281,8 @@ public class NearMissReportGenerator {
                 }
             }
 
-            if (skipped > 0) System.out.println("    Skipped " + skipped + " file(s).");
+            if (skipped > 0)
+                System.out.println("    Skipped " + skipped + " file(s).");
             return inserter.total();
         }
     }
@@ -317,7 +305,7 @@ public class NearMissReportGenerator {
         System.out.println("  Processing " + dates.size() + " date(s)...");
 
         int totalEvents = 0;
-        int artifactPairsSkipped = 0;   // sub-foot (0 ft) duplicate-track readings
+        int artifactPairsSkipped = 0; // sub-foot (0 ft) duplicate-track readings
 
         for (String date : dates) {
 
@@ -335,10 +323,11 @@ public class NearMissReportGenerator {
 
             for (Map.Entry<String, List<AircraftSnapshot>> entry : byTime.entrySet()) {
                 String time = entry.getKey();
-                int    currentSec = DateUtils.secondsOfDay(time);
+                int currentSec = DateUtils.secondsOfDay(time);
                 List<AircraftSnapshot> snaps = entry.getValue();
 
-                if (snaps.size() < 2) continue;
+                if (snaps.size() < 2)
+                    continue;
 
                 for (int i = 0; i < snaps.size(); i++) {
                     for (int j = i + 1; j < snaps.size(); j++) {
@@ -349,16 +338,23 @@ public class NearMissReportGenerator {
                         // any same-tail pair defensively -- loadByDate already
                         // dedupes (tail, second), but a guard here keeps the
                         // detector correct if that ever regresses.
-                        if (a.tail.equals(b.tail)) continue;
+                        if (a.tail.equals(b.tail))
+                            continue;
 
-                        AircraftSnapshot s1; AircraftSnapshot s2;
-                        String tail1; String tail2;
+                        AircraftSnapshot s1;
+                        AircraftSnapshot s2;
+                        String tail1;
+                        String tail2;
                         if (a.tail.compareTo(b.tail) <= 0) {
-                            tail1 = a.tail; s1 = a;
-                            tail2 = b.tail; s2 = b;
+                            tail1 = a.tail;
+                            s1 = a;
+                            tail2 = b.tail;
+                            s2 = b;
                         } else {
-                            tail1 = b.tail; s1 = b;
-                            tail2 = a.tail; s2 = a;
+                            tail1 = b.tail;
+                            s1 = b;
+                            tail2 = a.tail;
+                            s2 = a;
                         }
 
                         double distFt = GeoUtils.distance3dFeet(
@@ -367,7 +363,8 @@ public class NearMissReportGenerator {
 
                         if (!isNearMissSeparation(distFt)) {
                             // Track the 0-ft duplicate-track case for visibility.
-                            if (distFt < MIN_SEPARATION_FEET) artifactPairsSkipped++;
+                            if (distFt < MIN_SEPARATION_FEET)
+                                artifactPairsSkipped++;
                             continue;
                         }
 
@@ -385,25 +382,38 @@ public class NearMissReportGenerator {
                             // inclusive, so a bridged gap counts its missing
                             // seconds too. Reduces to +1 when perfectly adjacent.
                             ae.durationSecs += (currentSec - ae.lastSec);
-                            ae.lastSec       = currentSec;
+                            ae.lastSec = currentSec;
                             if (distFt < ae.minDist) {
                                 ae.minDist = distFt;
-                                ae.lat1 = s1.lat; ae.lon1 = s1.lon; ae.alt1 = s1.alt; ae.ias1 = s1.ias;
-                                ae.lat2 = s2.lat; ae.lon2 = s2.lon; ae.alt2 = s2.alt; ae.ias2 = s2.ias;
+                                ae.lat1 = s1.lat;
+                                ae.lon1 = s1.lon;
+                                ae.alt1 = s1.alt;
+                                ae.ias1 = s1.ias;
+                                ae.lat2 = s2.lat;
+                                ae.lon2 = s2.lon;
+                                ae.alt2 = s2.alt;
+                                ae.ias2 = s2.ias;
                             }
                         } else {
                             // gap or first sighting: close any previous event, start fresh
-                            if (ae != null) finalized.add(toEvent(ae, date));
+                            if (ae != null)
+                                finalized.add(toEvent(ae, date));
 
                             ActiveEvent fresh = new ActiveEvent();
-                            fresh.tail1        = tail1;
-                            fresh.tail2        = tail2;
-                            fresh.startTime    = time;
-                            fresh.lastSec      = currentSec;
+                            fresh.tail1 = tail1;
+                            fresh.tail2 = tail2;
+                            fresh.startTime = time;
+                            fresh.lastSec = currentSec;
                             fresh.durationSecs = 1;
-                            fresh.minDist      = distFt;
-                            fresh.lat1 = s1.lat; fresh.lon1 = s1.lon; fresh.alt1 = s1.alt; fresh.ias1 = s1.ias;
-                            fresh.lat2 = s2.lat; fresh.lon2 = s2.lon; fresh.alt2 = s2.alt; fresh.ias2 = s2.ias;
+                            fresh.minDist = distFt;
+                            fresh.lat1 = s1.lat;
+                            fresh.lon1 = s1.lon;
+                            fresh.alt1 = s1.alt;
+                            fresh.ias1 = s1.ias;
+                            fresh.lat2 = s2.lat;
+                            fresh.lon2 = s2.lon;
+                            fresh.alt2 = s2.alt;
+                            fresh.ias2 = s2.ias;
                             active.put(pairKey, fresh);
                         }
                     }
@@ -434,30 +444,30 @@ public class NearMissReportGenerator {
 
     private static NearMissEvent toEvent(ActiveEvent ae, String date) {
         NearMissEvent ev = new NearMissEvent();
-        ev.date            = date;
-        ev.startTime       = ae.startTime;
+        ev.date = date;
+        ev.startTime = ae.startTime;
         ev.durationSeconds = ae.durationSecs;
-        ev.tail1           = ae.tail1;
-        ev.tail2           = ae.tail2;
-        ev.lat1            = ae.lat1;
-        ev.lon1            = ae.lon1;
-        ev.alt1            = ae.alt1;
-        ev.ias1            = ae.ias1;
-        ev.lat2            = ae.lat2;
-        ev.lon2            = ae.lon2;
-        ev.alt2            = ae.alt2;
-        ev.ias2            = ae.ias2;
-        ev.minDistanceFt   = ae.minDist;
-        ev.yearMonth       = DateUtils.yearMonthKey(date);
+        ev.tail1 = ae.tail1;
+        ev.tail2 = ae.tail2;
+        ev.lat1 = ae.lat1;
+        ev.lon1 = ae.lon1;
+        ev.alt1 = ae.alt1;
+        ev.ias1 = ae.ias1;
+        ev.lat2 = ae.lat2;
+        ev.lon2 = ae.lon2;
+        ev.alt2 = ae.alt2;
+        ev.ias2 = ae.ias2;
+        ev.minDistanceFt = ae.minDist;
+        ev.yearMonth = DateUtils.yearMonthKey(date);
         return ev;
     }
 
     private static class ActiveEvent {
         String tail1;
         String tail2;
-        String startTime;      // HH:MM:SS at event start
-        int    lastSec;        // seconds-of-day of most recent qualifying second
-        long   durationSecs;
+        String startTime; // HH:MM:SS at event start
+        int lastSec; // seconds-of-day of most recent qualifying second
+        long durationSecs;
         double minDist;
         double lat1, lon1, alt1, ias1;
         double lat2, lon2, alt2, ias2;

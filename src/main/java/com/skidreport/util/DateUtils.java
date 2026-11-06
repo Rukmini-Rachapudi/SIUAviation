@@ -82,18 +82,6 @@ public class DateUtils {
         return ZoneOffset.ofHoursMinutesSeconds(sign * hh, sign * mm, sign * ss);
     }
 
-    /**
-     * Today's run-date folder name, e.g. "11-may-2026".
-     * Shared by every generator so a single MainRunner invocation drops all
-     * reports into the same Output/<dayFolder>/... tree.
-     */
-    public static String todayDayFolder() {
-        return LocalDate.now()
-                .format(DateTimeFormatter.ofPattern("d-MMM-yyyy"))
-                .toLowerCase();
-    }
-
-
     private static final String[] MONTH_NAMES = {
             "January","February","March","April","May","June",
             "July","August","September","October","November","December"

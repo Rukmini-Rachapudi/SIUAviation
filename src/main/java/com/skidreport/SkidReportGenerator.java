@@ -6,6 +6,8 @@ import com.skidreport.excel.SkidExcelWriter;
 import com.skidreport.model.SkidEvent;
 import com.skidreport.util.CsvParser;
 import com.skidreport.util.DateUtils;
+import com.skidreport.util.DuplicateRowFilter;
+import com.skidreport.util.FleetLogIndex;
 
 import java.io.File;
 import java.io.IOException;
@@ -20,9 +22,11 @@ import java.util.TreeMap;
  *
  * Orchestrates skid report generation for all aircraft.
  *
- * For each aircraft folder:
- *   1. Collects all CSV files
- *   2. Processes in batches of BATCH_SIZE
+ * For each aircraft:
+ *   1. Takes its CSV files from FleetLogIndex (assigned by the log's own
+ *      avionics system_id, so misfiled logs land on the right aircraft)
+ *   2. Processes in batches of BATCH_SIZE, dropping any row whose second was
+ *      already read from another file (DuplicateRowFilter)
  *   3. Feeds every record into a SkidEventDetector (one event = run of
  *      consecutive seconds satisfying the skid condition; any single
  *      non-triggering record closes the event; missing rows transparent)
@@ -40,17 +44,9 @@ public class SkidReportGenerator {
 
     private static final int BATCH_SIZE = 10;
 
-    private static final String[] ALL_TAIL_NUMBERS = {
-            "41E","3FS","4FS","5FS","46A","47E","48A","49A",
-            "13N","31T","41K","61J","83H","2JP",
-            "06H","97B","59Y","78K","49K","29E","82P"
-    };
-
     public static void main(String[] args) throws IOException {
-        String dayFolder = DateUtils.todayDayFolder();
-
         File rootDir   = new File(INPUT_PATH);
-        File outputDir = new File(OUTPUT_PATH + File.separator + dayFolder);
+        File outputDir = new File(OUTPUT_PATH);
 
         if (!rootDir.exists() || !rootDir.isDirectory()) {
             System.err.println("ERROR: INPUT_PATH not found: " + INPUT_PATH);
@@ -62,11 +58,9 @@ public class SkidReportGenerator {
         System.out.println("Output     : " + outputDir.getAbsolutePath());
         System.out.println("Batch size : " + BATCH_SIZE);
 
-        File[] subdirs = rootDir.listFiles(File::isDirectory);
-        if (subdirs == null || subdirs.length == 0) {
-            System.out.println("No subdirectories found.");
-            return;
-        }
+        // Every log is assigned to the aircraft that recorded it (from its
+        // system_id), not to the folder it happens to sit in.
+        Map<String, List<File>> filesByTail = FleetLogIndex.filesByTail(rootDir);
 
         try {
             SkidCsvWriter.beginConsolidated();
@@ -75,13 +69,11 @@ public class SkidReportGenerator {
         }
 
         boolean anyProcessed = false;
-        for (File dir : subdirs) {
-            String tail = detectTailNumber(dir.getName());
-            if (tail != null) {
-                System.out.println("\n--- Processing " + tail + " ---");
-                processFlightFolder(tail, dir, outputDir);
-                anyProcessed = true;
-            }
+        for (Map.Entry<String, List<File>> entry : filesByTail.entrySet()) {
+            String tail = entry.getKey();
+            System.out.println("\n--- Processing " + tail + " ---");
+            processFlightFiles(tail, entry.getValue(), outputDir);
+            anyProcessed = true;
         }
 
         try {
@@ -98,11 +90,11 @@ public class SkidReportGenerator {
     }
 
     // ------------------------------------------------------------------------
-    // FLIGHT FOLDER
+    // ONE AIRCRAFT
+    // csvFiles come from FleetLogIndex already sorted by name (= time order,
+    // with copies of the same log side by side for DuplicateRowFilter).
     // ------------------------------------------------------------------------
-    private static void processFlightFolder(String tail, File flightDir, File outputDir) {
-        List<File> csvFiles = new ArrayList<>();
-        CsvParser.collectCsvFiles(flightDir, csvFiles);
+    private static void processFlightFiles(String tail, List<File> csvFiles, File outputDir) {
         System.out.println("  CSV files found: " + csvFiles.size());
 
         if (csvFiles.isEmpty()) {
@@ -123,6 +115,7 @@ public class SkidReportGenerator {
     private static void processBatches(String tail, List<File> allFiles, File outputDir) {
 
         SkidEventDetector detector = new SkidEventDetector(tail);
+        DuplicateRowFilter dedup   = new DuplicateRowFilter();
 
         int totalBatches = (int) Math.ceil((double) allFiles.size() / BATCH_SIZE);
         int batchNumber  = 0;
@@ -137,7 +130,10 @@ public class SkidReportGenerator {
 
             for (File csv : batch) {
                 try {
-                    CsvParser.streamSkidCsvFile(csv, detector::accept);
+                    dedup.startFile(csv);
+                    CsvParser.streamSkidCsvFile(csv, rec -> {
+                        if (dedup.firstSighting(rec)) detector.accept(rec);
+                    });
                 } catch (Exception e) {
                     System.err.println("    [WARN] Skipping " + csv.getName() + ": " + e.getMessage());
                 }
@@ -148,6 +144,10 @@ public class SkidReportGenerator {
 
         List<SkidEvent> allEvents = detector.flush();
         System.out.printf("  All batches done -- %d skid event(s) detected.%n", allEvents.size());
+        if (dedup.skipped() > 0) {
+            System.out.printf("  Skipped %d duplicate row(s) -- same flight logged in more than one file.%n",
+                    dedup.skipped());
+        }
 
         if (allEvents.isEmpty()) {
             System.out.println("  No skid events found for " + tail);
@@ -170,15 +170,5 @@ public class SkidReportGenerator {
 
         System.out.printf("  Done: %d total skid event(s) across %d monthly file(s).%n",
                 totalEvents, byMonth.size());
-    }
-
-    // ------------------------------------------------------------------------
-    // DETECT TAIL NUMBER FROM FOLDER NAME
-    // ------------------------------------------------------------------------
-    private static String detectTailNumber(String folderName) {
-        for (String tail : ALL_TAIL_NUMBERS) {
-            if (folderName.contains(tail)) return tail;
-        }
-        return null;
     }
 }

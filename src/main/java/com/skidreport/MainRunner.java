@@ -13,13 +13,12 @@ package com.skidreport;
  *
  * OUTPUT STRUCTURE:
  *   Output/
- *     <dayFolder>/                            (e.g. 11-may-2026, one per run)
- *       Skids/<YYYY>/<MonthName>/
- *         Skids_<tail>_<YYYY>_<MM>_<Month>.xlsx
- *       Bank Pitch Events/<YYYY>/<MonthName>/
- *         BankPitch_<tail>_<YYYY>_<MM>_<Month>.xlsx
- *       Near Miss/<YYYY>/<MonthName>/         (when near-miss is re-enabled)
- *         NearMiss_<tail1>_<tail2>_<YYYY>_<MM>_<Month>.xlsx
+ *     Skids/<YYYY>/<MonthName>/
+ *       Skids_<tail>_<YYYY>_<MM>_<Month>.xlsx
+ *     Bank Pitch Events/<YYYY>/<MonthName>/
+ *       BankPitch_<tail>_<YYYY>_<MM>_<Month>.xlsx
+ *     Near Miss/<YYYY>/<MonthName>/
+ *       NearMiss_<tail1>_<tail2>_<YYYY>_<MM>_<Month>.xlsx
  *     NearMiss/
  *       near_miss.db                          (stable cache path, reused across runs)
  *     CSV/                                    (Power BI mirror, stable root)

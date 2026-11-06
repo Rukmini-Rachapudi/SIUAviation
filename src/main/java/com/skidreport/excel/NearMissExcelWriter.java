@@ -16,7 +16,7 @@ import java.util.List;
  * NearMissExcelWriter
  *
  * Writes one Excel file per aircraft pair per month. One row per aggregated
- * event (a run of consecutive seconds the pair was within 500 ft); the
+ * event (a run of consecutive seconds the pair was within 800 ft); the
  * aircraft snapshot columns are taken at the second of closest approach.
  * Output: <outputDir>/<YYYY>/<MonthName>/NearMiss_<tail1>_<tail2>_<YYYY>_<MM>_<Month>.xlsx
  * where outputDir = Output/<dayFolder>/Near Miss/.

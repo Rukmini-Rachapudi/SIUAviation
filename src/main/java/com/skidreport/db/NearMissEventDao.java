@@ -15,7 +15,7 @@ import java.util.function.Consumer;
  *
  * All insert and fetch operations on the near_miss_events table.
  * Each row represents one aggregated event -- a run of consecutive seconds
- * where two aircraft were within 500 ft of each other -- with start time,
+ * where two aircraft were within 800 ft of each other -- with start time,
  * duration, and the closest-approach snapshot for both aircraft.
  */
 public class NearMissEventDao {

@@ -42,7 +42,7 @@ import java.util.Map;
  * (600 ft MSL clears the ~411 ft fields, so ground/taxi/rollout rows are
  * excluded while every airborne event -- including pattern traffic -- is kept.)
  *
- * NEAR-MISS: straight-line 3D distance < 500 ft -- Haversine horizontal
+ * NEAR-MISS: straight-line 3D distance < 800 ft -- Haversine horizontal
  * distance combined with the AltMSL vertical difference. Direction
  * (horizontal, vertical, or diagonal) does not matter.
  */

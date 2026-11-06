@@ -3,10 +3,10 @@ package com.skidreport.model;
 /**
  * One aggregated near-miss event.
  *
- * An event opens on the first second a pair of aircraft is within 500 ft (3D)
+ * An event opens on the first second a pair of aircraft is within 800 ft (3D)
  * and extends only while consecutive seconds (t, t+1, t+2, ...) keep
  * qualifying. Any gap -- a non-consecutive second, a second where the pair is
- * no longer within 500 ft, or a date boundary -- closes the event.
+ * no longer within 800 ft, or a date boundary -- closes the event.
  *
  * The lat/lon/alt/ias fields capture the snapshot of each aircraft at the
  * second of closest approach during the event window. minDistanceFt is the

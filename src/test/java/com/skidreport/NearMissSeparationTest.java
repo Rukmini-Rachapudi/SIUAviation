@@ -6,7 +6,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * R3 separation: a reportable near-miss is closer than 500 ft AND no closer
+ * R3 separation: a reportable near-miss is closer than 800 ft AND no closer
  * than the 1 ft duplicate-track floor. The floor answers "how can the minimum
  * distance be 0 feet?" -- a 0 ft reading is the same GPS track duplicated
  * across two tails, never two real aircraft, so it must be excluded.
@@ -17,7 +17,7 @@ public class NearMissSeparationTest {
     public void typicalNearMiss_included() {
         assertTrue(NearMissReportGenerator.isNearMissSeparation(250.0));
         assertTrue(NearMissReportGenerator.isNearMissSeparation(1.0));   // floor is inclusive
-        assertTrue(NearMissReportGenerator.isNearMissSeparation(499.99));
+        assertTrue(NearMissReportGenerator.isNearMissSeparation(799.99));
     }
 
     @Test
@@ -30,7 +30,7 @@ public class NearMissSeparationTest {
 
     @Test
     public void atOrBeyondThreshold_excluded() {
-        assertFalse("500 ft is not < 500", NearMissReportGenerator.isNearMissSeparation(500.0));
+        assertFalse("800 ft is not < 800", NearMissReportGenerator.isNearMissSeparation(800.0));
         assertFalse(NearMissReportGenerator.isNearMissSeparation(1200.0));
     }
 }
